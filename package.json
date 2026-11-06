@@ -3,7 +3,7 @@
   "displayName": "Fast Project Indexer ",
   "description": "Lightning-fast text search for VS Code using a background inverted trigram index.",
   "publisher": "eric",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "engines": {
     "vscode": "^1.108.0"
   },
@@ -171,17 +171,12 @@
           "maximum": 50,
           "description": "Lines shown above and below the match in the preview (2 = two above, two below)."
         },
-        "fastIndex.inlinePreview": {
-          "type": "boolean",
-          "default": false,
-          "description": "Show a read-only preview pane inside the Fast Index sidebar while hovering a result. Off by default: use the Fast Index Preview panel in the bottom panel instead."
-        },
         "fastIndex.previewHoverDelay": {
           "type": "number",
           "default": 1500,
           "minimum": 0,
           "maximum": 10000,
-          "description": "Milliseconds to rest the pointer on a search result before the inline preview loads. 0 shows it immediately."
+          "description": "Milliseconds to rest the pointer on a search result before the Preview Panel updates. 0 updates it immediately."
         },
         "fastIndex.persistPinnedSearches": {
           "type": "boolean",

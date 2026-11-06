@@ -75,11 +75,9 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('vscode-fast-index.unlockResults', () => sidebarProvider.setLock(false)),
         vscode.commands.registerCommand('vscode-fast-index.toggleSettings', () => sidebarProvider.showSettings()),
         vscode.commands.registerCommand('vscode-fast-index.showMenu', async () => {
-            const inline = vscode.workspace.getConfiguration('fastIndex').get<boolean>('inlinePreview') === true;
             const items: (vscode.QuickPickItem & { id: string })[] = [
                 { id: 'pinned', label: '$(pin) Show or hide pinned searches' },
                 { id: 'preview', label: '$(preview) Open the preview panel' },
-                { id: 'inline', label: inline ? '$(eye-closed) Turn off the inline preview' : '$(eye) Turn on the inline preview' },
                 { id: 'log', label: '$(output) Show the search log' }
             ];
             const picked = await vscode.window.showQuickPick(items, { title: 'Fast Index', placeHolder: 'Choose an action' });
@@ -87,10 +85,6 @@ export async function activate(context: vscode.ExtensionContext) {
             if (picked.id === 'pinned') sidebarProvider.togglePinnedSearches();
             if (picked.id === 'preview') void vscode.commands.executeCommand('vscode-fast-index.openPreview');
             if (picked.id === 'log') searchLog.show(true);
-            if (picked.id === 'inline') {
-                await vscode.workspace.getConfiguration('fastIndex').update('inlinePreview', !inline, vscode.ConfigurationTarget.Global);
-                sidebarProvider.sendConfig();
-            }
         }),
         vscode.commands.registerCommand('vscode-fast-index.openPreview', async () => {
             // Focus the view, else reveal its container, else tell the user where it is.

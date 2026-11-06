@@ -9,11 +9,10 @@ Instead of searching text "on the fly" for every query, the plugin builds an inv
 * **Instant Search:** Results appear as you type (from 3 characters) with zero lag. The search box takes focus when the panel opens and doubles as an editable combo box: recent searches drop down from the ▾ button on the right, `↑`/`↓` walk them, `Enter` runs the highlighted one. The list size is `fastIndex.maxRecentSearches` (default 20, 0 disables it).
 * **No surprise prefills:** opening the panel never restores the previous query and never seeds the box from the editor cursor — it starts empty. It is only seeded when you open it with an explicit **selection** in the editor; while the panel is open, moving the cursor onto a word (or selecting text) keeps the box in sync. Opening or switching files does not count as a cursor move. Toggle the whole behaviour with `fastIndex.followEditor` (or the checkbox in the panel settings), or freeze it temporarily with the 🔒 title-bar lock.
 * **Replace keeps the index current:** applying a replacement re-indexes the affected buffers immediately, and searching reads open (dirty) documents, so replaced text disappears from results and new text is findable without saving first.
-* **Results in the editor:** the book icon in the title bar (**Fast Index: Open Results in Editor**) opens the current results as a real editor tab — full theme, syntax highlighting, folding, find — grouped by file, in the same order as the tree view (depth first), with `fastIndex.previewContextLines` context lines around each match, the match marked `>`, a blank line between entries, and Ctrl+click on a match to jump to that file and line. The tab is generated (edits are not saved).
+* **Results in the editor:** the book icon in the title bar (**Fast Index: Open Results in Editor**) opens the current results as a real editor tab, written in VS Code's own search-editor format so the built-in `search-result` language gives it theme-driven syntax highlighting, Follow-link targets and peek-on-click. It is driven by the panel and refreshed in place. Set `fastIndex.autoOpenResults` to have it open itself after a search.
 * **Preview panel:** a read-only preview docked in the bottom panel next to the terminal — run **Fast Index: Open Preview Panel** or pick *Fast Index Preview* from the panel's view menu. It follows whichever result the sidebar is resting on, highlights the **search term itself** inside the matched line, and clicking any line opens that file at that line. It is styled from the editor's own theme: `editor.background`/`foreground`, font family, size, weight and `editor.lineHeight`, line-number gutter colours, current-line highlight, selection and scrollbar colours, plus the theme's `tokenColors` for syntax.
-* **Inline preview (off by default):** enable `fastIndex.inlinePreview` to also get a preview pane inside the sidebar; resting the pointer on a result for `fastIndex.previewHoverDelay` (default 1500 ms, adjustable in ⚙️ Settings) fills that docked, read-only pane with `fastIndex.previewContextLines` lines above and below (default 2) and the search term highlighted. Only a row the pointer is still resting on is previewed — sweeping across results never swaps the preview.
 * **Balanced results:** at most `fastIndex.maxResultsPerFile` matching lines per file (default 3, 0 = unlimited) and a fair share of the result list per workspace folder, so one huge engine file can no longer hide your own project's hits.
-* **Title-bar buttons:** the 🔒/🔓 lock, ⚙️ settings and ☰ menu sit in the view's title bar next to the name, like the built-in Search view. The 🔒 **lock** freezes the search — clicking or moving the cursor in the editor no longer refills the query, so results stay put while you read code; the state survives reloads. The ☰ menu offers pinned-search show/hide, the preview panel, the inline-preview toggle and the search log.
+* **Title-bar buttons:** the 🔒/🔓 lock, ⚙️ settings and ☰ menu sit in the view's title bar next to the name, like the built-in Search view. The 🔒 **lock** freezes the search — clicking or moving the cursor in the editor no longer refills the query, so results stay put while you read code; the state survives reloads. The ☰ menu offers pinned-search show/hide, the preview panel and the search log.
 * **Pinned searches:** the 📌 button saves the current search — term, `Aa`/`.*`, `Only in`, `Skip`, the results filter and your collapsed tree branches. Pins live in a scrollable, resizable box anchored at the bottom of the panel (drag its top edge to resize, or hide it from the ☰ menu); each shows the main term with its extra parameters (scope, filter, `Aa`/`.*`) in muted text beneath, so pins with the same term stay distinguishable. Click one to restore the whole state, or use its ✕ to remove it. Kept per workspace and across sessions by `fastIndex.persistPinnedSearches` (default on; turn it off — or untick it in the panel settings — to keep pins for the session only).
 * **Search log:** the ☰ menu's *Show the search log* opens a **Fast Index** output panel that records every search with its trigger (typing, pin, filter, scope, prefill…), its scope/filter and the result counts, plus prefills that were ignored and why, and searches superseded by a newer one. Use it when results change unexpectedly.
 * **Latest search wins:** starting a search cancels the one in flight; stale results are discarded instead of overwriting the newer list.
@@ -46,9 +45,8 @@ You can customize the extension directly via the **⚙️** title-bar button:
 * **Exclude Patterns:** Glob patterns for files/folders to ignore (e.g., `{**/node_modules/**,**/.git/**}`).
 * **Max File Size (KB):** Prevent the indexer from choking on huge minified or binary files (default is `512` KB).
 * **Max Search Results:** Limit the number of snippets shown to keep the UI responsive (default is `50`).
-* **Preview Hover Delay:** Milliseconds to rest the pointer on a result before the inline preview loads (default `1500`, 0 = instant).
+* **Preview Hover Delay:** Milliseconds to rest the pointer on a result before the Preview Panel updates (default `1500`, 0 = instant).
 * **Preview Context Lines:** Lines shown above and below a match (default `2`).
-* **Show the inline preview:** on/off (default off — the bottom Preview Panel is the primary surface).
 * **Keep pinned searches between sessions:** on/off (default on).
 * **Open the results editor automatically:** on/off (default off, also `fastIndex.autoOpenResults`). When on, a search that finds matches reopens the results tab if you closed it — without stealing focus, so you can keep typing in the panel.
 * **Follow editor selection / word under cursor:** on/off.
@@ -78,7 +76,7 @@ The preview surfaces share `src/theme.ts`, which resolves `workbench.colorTheme`
 
 ## Changelog — current development session
 
-Everything below landed in one session (0.3.6 → 0.9.1).
+Everything below landed in one session (0.3.6 → 0.9.2).
 
 ### Search UI
 
@@ -97,7 +95,7 @@ Everything below landed in one session (0.3.6 → 0.9.1).
 
 ### Preview
 
-* Added a docked **preview panel** (new view container in the bottom panel, next to the terminal) and an optional inline sidebar pane (`fastIndex.inlinePreview`, off by default).
+* Added a docked **preview panel** (new view container in the bottom panel, next to the terminal).
 * Preview follows the hovered result without swapping while the pointer travels to the pane; only a row the pointer still rests on is previewed (`fastIndex.previewHoverDelay`, default 1500 ms).
 * `fastIndex.previewContextLines` (default 2) controls how many lines are shown above and below a match.
 * The **search term itself** is highlighted inside the matched line; when a theme's find-highlight colour is nearly invisible against its background (e.g. Synthwave), the highlight is blended from the cursor colour plus an accent underline.

@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ProjectIndexer, isFileNameMatch, fileNameRank, SearchScope } from './indexer';
-import { readThemeTokenColors } from './theme';
 import { log } from './log';
 
 export interface PinnedSearch {
@@ -53,7 +52,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 maxRecentSearches: config.get<number>('maxRecentSearches') ?? 20,
                 previewHoverDelay: config.get<number>('previewHoverDelay') ?? 1500,
                 previewContextLines: config.get<number>('previewContextLines') ?? 2,
-                inlinePreview: config.get<boolean>('inlinePreview') === true,
                 followEditor: config.get<boolean>('followEditor') ?? true,
                 persistPinnedSearches: config.get<boolean>('persistPinnedSearches') !== false,
                 autoOpenResults: config.get<boolean>('autoOpenResults') === true
@@ -109,14 +107,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    /** Copies the active colour theme's token colours into the preview's CSS variables. */
-    private publishThemeColors(): void {
-        const colors = readThemeTokenColors();
-        if (colors && Object.keys(colors).length > 0) {
-            this._view?.webview.postMessage({ type: 'tokens', value: colors });
-        }
-    }
-
     private async persistPinned(): Promise<void> {
         const saves = vscode.workspace.getConfiguration('fastIndex').get<boolean>('persistPinnedSearches') !== false;
         if (!saves || !this.memento) return;
@@ -145,12 +135,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             this.prefillTimer = setTimeout(() => this.prefillFromEditor(), 250);
         };
 
-        const themeWatcher = vscode.workspace.onDidChangeConfiguration(event => {
-            if (event.affectsConfiguration('workbench.colorTheme')) this.publishThemeColors();
-        });
-
         const followDisposables: vscode.Disposable[] = [
-            themeWatcher,
             vscode.window.onDidChangeTextEditorSelection(event => {
                 if (event.textEditor !== vscode.window.activeTextEditor) return;
                 // Opening a file parks the cursor at 0,0 and fires a "Command" selection
@@ -212,35 +197,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 }
                 case 'ready': {
                     this.prefillOnOpen();
-                    this.publishThemeColors();
                     this._view?.webview.postMessage({ type: 'locked', value: this.locked });
                     this._view?.webview.postMessage({ type: 'focus' });
                     break;
                 }
                 case 'getContext': {
+                    // A hovered result drives the bottom Preview Panel; it no longer
+                    // renders anything inside this webview.
                     const file = String(data.file || '');
                     const line = Number(data.line) || 0;
-                    const configuredRadius = vscode.workspace.getConfiguration('fastIndex').get<number>('previewContextLines');
-                    const radius = Math.max(0, Math.min(50, Math.round(typeof configuredRadius === 'number' ? configuredRadius : 2)));
-                    let start = Math.max(0, line - radius);
-                    let lines: string[] = [];
-
-                    try {
-                        const open = vscode.workspace.textDocuments.find(document => document.uri.fsPath === file);
-                        const document = open ?? await vscode.workspace.openTextDocument(vscode.Uri.file(file));
-                        const all = document.getText().split('\n');
-                        start = Math.max(0, line - radius);
-                        const end = Math.min(all.length, line + radius + 1);
-                        lines = all.slice(start, end);
-                    } catch {
-                        /* unreadable file: show nothing */
-                    }
-
-                    this._view?.webview.postMessage({
-                        type: 'context',
-                        requestId: data.requestId,
-                        value: { file, line, start, lines }
-                    });
                     const snapshot = this.lastSnapshot;
                     this.onPreview?.(file, line, snapshot ? snapshot.query : '', !!snapshot?.isRegex, !!snapshot?.isMatchCase);
                     break;
@@ -371,7 +336,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         maxRecentSearches: config.get<number>('maxRecentSearches') ?? 20,
                         previewHoverDelay: config.get<number>('previewHoverDelay') ?? 1500,
                         previewContextLines: config.get<number>('previewContextLines') ?? 2,
-                        inlinePreview: config.get<boolean>('inlinePreview') === true,
                         followEditor: config.get<boolean>('followEditor') ?? true,
                         persistPinnedSearches: config.get<boolean>('persistPinnedSearches') !== false,
                         autoOpenResults: config.get<boolean>('autoOpenResults') === true
@@ -392,7 +356,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         maxRecentSearches: clampNumber(input.maxRecentSearches, current.maxRecentSearches, 0, 100),
                         previewHoverDelay: clampNumber(input.previewHoverDelay, current.previewHoverDelay, 0, 10000),
                         previewContextLines: clampNumber(input.previewContextLines, current.previewContextLines, 0, 50),
-                        inlinePreview: typeof input.inlinePreview === 'boolean' ? input.inlinePreview : current.inlinePreview,
                         followEditor: typeof input.followEditor === 'boolean' ? input.followEditor : current.followEditor,
                         persistPinnedSearches: typeof input.persistPinnedSearches === 'boolean' ? input.persistPinnedSearches : current.persistPinnedSearches,
                         autoOpenResults: typeof input.autoOpenResults === 'boolean' ? input.autoOpenResults : current.autoOpenResults
@@ -838,25 +801,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     .result-header { display: flex; justify-content: space-between; align-items: center; }
                     .file-name { font-weight: bold; font-size: 0.9em; color: var(--vscode-textLink-foreground); }
                     .name-badge { font-size: 0.75em; padding: 0 4px; margin: 0 6px auto 4px; border-radius: 2px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
-                    .preview-pane { display: none; flex-direction: column; flex: 0 0 auto; height: 190px; min-height: 80px; max-height: 70vh; margin-top: 4px; overflow: hidden; background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); border: 1px solid var(--vscode-editorWidget-border, var(--vscode-widget-border)); border-radius: 4px; font-family: var(--vscode-editor-font-family, monospace); font-size: var(--vscode-editor-font-size, 12px); line-height: 1.45; }
-                    .preview-head { display: flex; align-items: center; gap: 8px; padding: 3px 8px; background: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-editor-background)); border-bottom: 1px solid var(--vscode-editorWidget-border, var(--vscode-widget-border)); font-family: var(--vscode-font-family); font-size: 0.85em; }
-                    .preview-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-                    .preview-hint { opacity: 0.5; white-space: nowrap; }
-                    .preview-close { cursor: pointer; opacity: 0.65; padding: 0 2px; }
-                    .preview-close:hover { opacity: 1; }
-                    .preview-body { flex: 1 1 auto; overflow: auto; padding: 4px 8px 5px 4px; min-height: 0; }
-                    .preview-line { display: flex; gap: 10px; white-space: pre; }
-                    .preview-lineno { color: var(--vscode-editorLineNumber-foreground, inherit); opacity: 0.9; min-width: 3ch; text-align: right; user-select: none; }
-                    .preview-line.match { background: var(--vscode-editor-findMatchHighlightBackground, rgba(234,92,0,0.33)); }
-                    body { --tok-keyword: #569cd6; --tok-type: #4ec9b0; --tok-string: #ce9178; --tok-number: #b5cea8; --tok-comment: #6a9955; --tok-call: #dcdcaa; --tok-preproc: #c586c0; }
-                    body.vscode-light { --tok-keyword: #0000ff; --tok-type: #267f99; --tok-string: #a31515; --tok-number: #098658; --tok-comment: #008000; --tok-call: #795e26; --tok-preproc: #af00db; }
-                    .tok-keyword { color: var(--tok-keyword); }
-                    .tok-type { color: var(--tok-type); }
-                    .tok-string { color: var(--tok-string); }
-                    .tok-number { color: var(--tok-number); }
-                    .tok-comment { color: var(--tok-comment); font-style: italic; }
-                    .tok-call { color: var(--tok-call); }
-                    .tok-preproc { color: var(--tok-preproc); }
                     .results-toolbar { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
                     .tool-btn { padding: 2px 8px; font-size: 0.8em; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); flex: 0 0 auto; }
                     .tool-btn:hover { background: var(--vscode-button-secondaryHoverBackground); }
@@ -955,9 +899,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         <label><input type="checkbox" id="confPersistPinned" /> Keep pinned searches between sessions</label>
                     </div>
                     <div class="setting-item setting-check">
-                        <label><input type="checkbox" id="confInlinePreview" /> Show the inline preview in this panel (off by default — use the Preview Panel)</label>
-                    </div>
-                    <div class="setting-item setting-check">
                         <label><input type="checkbox" id="confAutoOpenResults" /> Open the results editor automatically when a search finds matches</label>
                     </div>
                     <div class="setting-item">
@@ -1001,14 +942,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 </div>
 
                 <div id="results"></div>
-                <div class="preview-pane" id="previewPane" style="display: none;">
-                    <div class="preview-head">
-                        <span class="preview-title" id="previewTitle"></span>
-                        <span class="preview-hint">read-only</span>
-                        <span class="preview-close" id="previewClose" title="Close preview">✕</span>
-                    </div>
-                    <div class="preview-body" id="previewBody"></div>
-                </div>
                 <div class="pinned-resizer" id="pinnedResizer" style="display: none;"></div>
                 <div class="pinned-section" id="pinnedSection" style="display: none;">
                     <div class="pinned-head">Pinned searches</div>
@@ -1043,10 +976,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const historyList = document.getElementById('historyList');
                     const historyBtn = document.getElementById('historyBtn');
                     const treeMenu = document.getElementById('treeMenu');
-                    const previewPane = document.getElementById('previewPane');
-                    const previewTitle = document.getElementById('previewTitle');
-                    const previewBody = document.getElementById('previewBody');
-                    const previewClose = document.getElementById('previewClose');
                     const pinnedSection = document.getElementById('pinnedSection');
                     const pinnedList = document.getElementById('pinnedList');
                     const pinBtn = document.getElementById('pinBtn');
@@ -1055,7 +984,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const confFollowEditor = document.getElementById('confFollowEditor');
                     const confPersistPinned = document.getElementById('confPersistPinned');
                     const confPreviewDelay = document.getElementById('confPreviewDelay');
-                    const confInlinePreview = document.getElementById('confInlinePreview');
                     const confAutoOpenResults = document.getElementById('confAutoOpenResults');
                     const confContextLines = document.getElementById('confContextLines');
                     const scopeInclude = document.getElementById('scopeInclude');
@@ -1086,7 +1014,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     let applyingPrefill = false;
                     let pinnedSearches = [];
                     let previewDelay = 1500;
-                    let inlinePreview = false;
                     let locked = false;
                     let pinnedVisible = true;
                     let pinnedHeight = 170;
@@ -1272,7 +1199,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                                 persistPinnedSearches: confPersistPinned.checked,
                                 previewHoverDelay: confPreviewDelay.value,
                                 previewContextLines: confContextLines.value,
-                                inlinePreview: confInlinePreview.checked,
                                 autoOpenResults: confAutoOpenResults?.checked === true
                             }
                         });
@@ -1639,12 +1565,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         if (event.key === 'Escape') hideTreeMenu();
                     });
 
-                    previewClose.addEventListener('mousedown', function (event) {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        hidePreview();
-                    });
-
                     function renderTree(node, prefix, depth, container) {
                         Array.from(node.dirs.keys()).sort((a, b) => a.localeCompare(b)).forEach(name => {
                             const path = prefix ? prefix + '/' + name : name;
@@ -1833,192 +1753,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         return parts.join(' · ');
                     }
 
+
                     let previewTimer = null;
-                    let previewRequested = 0;
-                    let previewItem = null;
-
-                    function hidePreview() {
-                        clearTimeout(previewTimer);
-                        previewPane.style.display = 'none';
-                    }
-
-                    const CPP_KEYWORDS = new Set(('alignas alignof auto bool break case catch char class const constexpr continue default delete do double else enum explicit export extern false float for friend goto if inline int long mutable namespace new noexcept nullptr operator override private protected public register return short signed sizeof static static_cast struct switch template this throw true try typedef typename union unsigned using virtual void volatile while const_cast dynamic_cast reinterpret_cast').split(' '));
-                    const PY_KEYWORDS = new Set(('and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield True False None').split(' '));
-
-                    function languageFor(fileName) {
-                        const lower = String(fileName || '').toLowerCase();
-                        if (lower.endsWith('.py')) return 'python';
-                        if (/\.(c|cc|cpp|cxx|h|hh|hpp|hxx|inl|cs|m|mm)$/.test(lower)) return 'c';
-                        return 'plain';
-                    }
-
-                    /** Lightweight C/C++/C#/Python tokenizer: good enough for a 25-line preview. */
-                    const BACKSLASH = String.fromCharCode(92);
-
-                    function isIdentStart(ch) {
-                        return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || ch === '_';
-                    }
-
-                    function isIdentPart(ch) {
-                        return isIdentStart(ch) || (ch >= '0' && ch <= '9');
-                    }
-
-                    function isDigitChar(ch) {
-                        return ch >= '0' && ch <= '9';
-                    }
-
-                    /** Lightweight C/C++/C#/Python tokenizer: good enough for a 25-line preview. */
-                    function tokenizeLines(lines, language) {
-                        if (language === 'plain') return lines.map(function (line) { return [[line, '']]; });
-                        const keywords = language === 'python' ? PY_KEYWORDS : CPP_KEYWORDS;
-                        const result = [];
-                        let inBlock = false;
-
-                        lines.forEach(function (line) {
-                            const tokens = [];
-                            let i = 0;
-
-                            while (i < line.length) {
-                                const ch = line[i];
-
-                                if (inBlock) {
-                                    const close = line.indexOf('*/', i);
-                                    if (close < 0) {
-                                        tokens.push([line.slice(i), 'comment']);
-                                        i = line.length;
-                                    } else {
-                                        tokens.push([line.slice(i, close + 2), 'comment']);
-                                        i = close + 2;
-                                        inBlock = false;
-                                    }
-                                    continue;
-                                }
-
-                                if (ch === '/' && line[i + 1] === '/') {
-                                    tokens.push([line.slice(i), 'comment']);
-                                    break;
-                                }
-                                if (language === 'python' && ch === '#') {
-                                    tokens.push([line.slice(i), 'comment']);
-                                    break;
-                                }
-                                if (ch === '/' && line[i + 1] === '*') {
-                                    const close = line.indexOf('*/', i + 2);
-                                    if (close < 0) {
-                                        tokens.push([line.slice(i), 'comment']);
-                                        inBlock = true;
-                                        i = line.length;
-                                    } else {
-                                        tokens.push([line.slice(i, close + 2), 'comment']);
-                                        i = close + 2;
-                                    }
-                                    continue;
-                                }
-                                if (ch === '"' || ch === "'") {
-                                    let j = i + 1;
-                                    while (j < line.length) {
-                                        if (line[j] === BACKSLASH) { j += 2; continue; }
-                                        if (line[j] === ch) { j++; break; }
-                                        j++;
-                                    }
-                                    tokens.push([line.slice(i, j), 'string']);
-                                    i = j;
-                                    continue;
-                                }
-                                if (language === 'c' && ch === '#' && tokens.length === 0) {
-                                    let j = i + 1;
-                                    while (j < line.length && line[j] === ' ') j++;
-                                    while (j < line.length && isIdentPart(line[j])) j++;
-                                    tokens.push([line.slice(i, j), 'preproc']);
-                                    i = j;
-                                    continue;
-                                }
-                                if (isDigitChar(ch)) {
-                                    let j = i + 1;
-                                    while (j < line.length && (isIdentPart(line[j]) || line[j] === '.')) j++;
-                                    tokens.push([line.slice(i, j), 'number']);
-                                    i = j;
-                                    continue;
-                                }
-                                if (isIdentStart(ch)) {
-                                    let j = i + 1;
-                                    while (j < line.length && isIdentPart(line[j])) j++;
-                                    const word = line.slice(i, j);
-                                    let k = j;
-                                    while (k < line.length && line[k] === ' ') k++;
-                                    let cls = '';
-                                    if (keywords.has(word)) cls = 'keyword';
-                                    else if (word[0] >= 'A' && word[0] <= 'Z') cls = 'type';
-                                    else if (line[k] === '(') cls = 'call';
-                                    tokens.push([word, cls]);
-                                    i = j;
-                                    continue;
-                                }
-
-                                tokens.push([ch, '']);
-                                i += 1;
-                            }
-
-                            result.push(tokens);
-                        });
-
-                        return result;
-                    }
-
                     let previewHover = null;
 
                     function schedulePreview(item, element) {
                         clearTimeout(previewTimer);
-                        previewItem = item;
                         previewHover = element;
                         previewTimer = setTimeout(function () {
                             // Only preview a row the pointer is still resting on: sweeping
-                            // across results (e.g. to reach the preview) must not swap it.
+                            // across results must not swap the bottom-panel preview.
                             if (previewHover !== element) return;
-                            previewRequested++;
-                            vscode.postMessage({ type: 'getContext', requestId: previewRequested, file: item.file, line: item.line });
+                            vscode.postMessage({ type: 'getContext', file: item.file, line: item.line });
                         }, previewDelay);
-                    }
-
-                    function renderPreview(value) {
-                        if (!inlinePreview) return;
-                        if (!Array.isArray(value.lines) || value.lines.length === 0) return;
-
-                        const title = (previewItem && previewItem.fileName ? previewItem.fileName : value.file) + ' : ' + (value.line + 1);
-                        previewTitle.textContent = title;
-
-                        const language = languageFor(previewItem && previewItem.fileName);
-                        const normalized = value.lines.map(function (text) { return String(text).replace(/\t/g, '    '); });
-                        const tokenized = tokenizeLines(normalized, language);
-
-                        previewBody.innerHTML = '';
-                        normalized.forEach(function (text, index) {
-                            const lineNumber = value.start + index;
-                            const row = document.createElement('div');
-                            row.className = 'preview-line' + (lineNumber === value.line ? ' match' : '');
-
-                            const label = document.createElement('span');
-                            label.className = 'preview-lineno';
-                            label.textContent = String(lineNumber + 1);
-
-                            const code = document.createElement('span');
-                            code.className = 'preview-code';
-                            (tokenized[index] || []).forEach(function (pair) {
-                                const span = document.createElement('span');
-                                if (pair[1]) span.className = 'tok-' + pair[1];
-                                span.textContent = pair[0];
-                                code.appendChild(span);
-                            });
-
-                            row.appendChild(label);
-                            row.appendChild(code);
-                            previewBody.appendChild(row);
-                        });
-
-                        previewPane.style.display = 'flex';
-
-                        const matched = previewBody.querySelector('.preview-line.match');
-                        if (matched && matched.scrollIntoView) matched.scrollIntoView({ block: 'center' });
                     }
 
                     function describePin(pin) {
@@ -2141,10 +1888,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             confPersistPinned.checked = message.value.persistPinnedSearches !== false;
                             confPreviewDelay.value = message.value.previewHoverDelay ?? 1500;
                             confContextLines.value = message.value.previewContextLines ?? 2;
-                            confInlinePreview.checked = message.value.inlinePreview === true;
                             if (confAutoOpenResults) confAutoOpenResults.checked = message.value.autoOpenResults === true;
-                            inlinePreview = message.value.inlinePreview === true;
-                            if (!inlinePreview) previewPane.style.display = 'none';
                             previewDelay = Number.isFinite(Number(message.value.previewHoverDelay)) ? Math.max(0, Number(message.value.previewHoverDelay)) : 1500;
                             if (typeof message.value.maxRecentSearches === 'number') {
                                 confMaxRecent.value = message.value.maxRecentSearches;
@@ -2176,23 +1920,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             pinnedVisible = !pinnedVisible;
                             rememberLayout();
                             applyPinnedLayout();
-                        }
-
-                        if (message.type === 'tokens') {
-                            const colors = message.value || {};
-                            Object.keys(colors).forEach(function (key) {
-                                const color = colors[key];
-                                if (typeof color !== 'string' || color.charAt(0) !== '#') return;
-                                // Skip fully transparent theme entries (8-digit hex with 00 alpha):
-                                // they would render invisibly, so keep the default palette instead.
-                                const argb = /^#([0-9a-f]{6})([0-9a-f]{2})$/i.exec(color);
-                                if (argb && parseInt(argb[2], 16) < 16) return;
-                                document.body.style.setProperty('--tok-' + key, color);
-                            });
-                        }
-
-                        if (message.type === 'context') {
-                            if (message.requestId === previewRequested) renderPreview(message.value);
                         }
 
                         if (message.type === 'pinnedList') {
