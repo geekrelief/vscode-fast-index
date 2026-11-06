@@ -10,7 +10,7 @@ Instead of searching text "on the fly" for every query, the plugin builds an inv
 * **No surprise prefills:** opening the panel never restores the previous query. It seeds the box from an explicit **selection**, or from a caret **you** placed (clicking a word, or typing) — never from the caret a file open leaves at 0,0. While the panel is open, clicking onto a word (or selecting text) keeps the box in sync, and the box stops being "yours" as soon as focus returns to the editor. Toggle the whole behaviour with `fastIndex.followEditor` (or the checkbox in the panel settings), or freeze it temporarily with the 🔒 title-bar lock.
 * **Replace keeps the index current:** applying a replacement re-indexes the affected buffers immediately, and searching reads open (dirty) documents, so replaced text disappears from results and new text is findable without saving first.
 * **Results in the editor:** the book icon in the title bar (**Fast Index: Open Results in Editor**) opens the current results as a real editor tab, written in VS Code's own search-editor format so the built-in `search-result` language gives it theme-driven syntax highlighting, Follow-link targets and peek-on-click. It is driven by the panel and refreshed in place. Set `fastIndex.autoOpenResults` to have it open itself after a search.
-* **Hover follows into the results editor:** resting the pointer on a result for `fastIndex.hoverJumpDelay` (default 1500 ms) scrolls the results tab to that exact hit and puts the caret on it — without taking focus, so the search box keeps the keyboard. Only the row the pointer is still resting on counts; sweeping across results never yanks the tab around. If the tab is closed or hidden nothing happens.
+* **Hover follows into the results editor:** resting the pointer on a result for `fastIndex.hoverJumpDelay` (default 1500 ms) scrolls the results tab to that exact hit and flashes that line with the theme's own hover colour — without taking focus, moving the caret or re-running the search, so the search box keeps the keyboard. Only the row the pointer is still resting on counts; sweeping across results never yanks the tab around. If the tab is closed or hidden nothing happens.
 * **Balanced results:** at most `fastIndex.maxResultsPerFile` matching lines per file (default 3, 0 = unlimited) and a fair share of the result list per workspace folder, so one huge engine file can no longer hide your own project's hits.
 * **Title-bar buttons:** the 🔒/🔓 lock, ⚙️ settings and ☰ menu sit in the view's title bar next to the name, like the built-in Search view. The 🔒 **lock** freezes the search — clicking or moving the cursor in the editor no longer refills the query, so results stay put while you read code; the state survives reloads (a **🔒 Locked** badge in the results toolbar shows when a lock is in force). The ☰ menu offers pinned-search show/hide, the results editor and the search log.
 * **⚡ editor title button:** every editor shows the same zap icon as the view container; clicking it brings the Fast Index panel forward. That is what gets you back to the panel after the container has been moved to the **Secondary Side Bar**, where the Activity Bar icon is gone.
@@ -79,7 +79,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog
 
-### 0.8.0 → 0.11.3 — results editor, preview removal, prefill and settings fixes
+### 0.8.0 → 0.11.4 — results editor, preview removal, prefill and settings fixes
 
 #### Results tab in the editor
 
@@ -92,7 +92,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 * The panel still owns everything: one stable tab is rewritten in place on every new search (including replacements and Tree/List switches), so query, filters and context lines are always the panel's current ones — there are no controls inside the document.
 * New **`fastIndex.autoOpenResults`** (default off): a search that finds matches reopens the tab if it was closed, with `preserveFocus` so the search box keeps the keyboard. Closing that tab is treated as deliberate — by mouse or by shortcut, it took an explicit action — so the next result-bearing search opens it again.
 * "Is the tab open?" is now judged from the tab strip (`window.tabGroups`), not from loaded documents: a closed virtual document stays loaded in memory, which previously made the tab stop auto-opening after a few searches while the panel kept updating.
-* Resting the pointer on a result scrolls that tab to the hit (`fastIndex.hoverJumpDelay`, default 1500 ms) without stealing focus; only the row the pointer still rests on counts, so sweeping never yanks the tab.
+* Resting the pointer on a result scrolls that tab to the hit (`fastIndex.hoverJumpDelay`, default 1500 ms) and flashes the line with the theme's `editor.hoverHighlightBackground`, without stealing focus or moving the caret; only the row the pointer still rests on counts, so sweeping never yanks the tab.
 
 #### Removed: both previews
 

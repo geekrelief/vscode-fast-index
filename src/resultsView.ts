@@ -28,6 +28,8 @@ export class ResultsView implements vscode.Disposable {
     private syncQueued = false;
     /** `${file}:${line}` -> document line of the matching hit, filled by render(). */
     private matchLines = new Map<string, number>();
+    private hoverHighlight?: vscode.TextEditorDecorationType;
+    private hoverHighlightTimer?: ReturnType<typeof setTimeout>;
     private lastPeek?: { line: number; version: number; at: number };
 
     public constructor(
@@ -113,9 +115,10 @@ export class ResultsView implements vscode.Disposable {
     }
 
     /**
-     * Scrolls the results tab to a specific hit. Called when the pointer rests on
-     * a result in the sidebar; a closed or hidden tab is left alone, and nothing
-     * is focused, so the panel keeps the keyboard.
+     * Scrolls the results tab to a specific hit and flashes that line. Called when
+     * the pointer rests on a result in the sidebar; a closed or hidden tab is left
+     * alone, the caret is not moved, and nothing is focused, so the panel keeps the
+     * keyboard and no search is re-run.
      */
     public reveal(file: string, line: number): void {
         const target = this.matchLines.get(file + ':' + line);
@@ -129,8 +132,30 @@ export class ResultsView implements vscode.Disposable {
 
         const range = editor.document.lineAt(target).range;
         editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
-        const position = new vscode.Position(target, 0);
-        editor.selection = new vscode.Selection(position, position);
+
+        if (!this.hoverHighlight) {
+            // The theme's own hover colour: it reads as "this is what you are pointing at"
+            // without competing with the match decorations the search-result grammar adds.
+            this.hoverHighlight = vscode.window.createTextEditorDecorationType({
+                isWholeLine: true,
+                backgroundColor: new vscode.ThemeColor('editor.hoverHighlightBackground')
+            });
+        }
+        editor.setDecorations(this.hoverHighlight, [range]);
+
+        if (this.hoverHighlightTimer) clearTimeout(this.hoverHighlightTimer);
+        this.hoverHighlightTimer = setTimeout(() => {
+            this.hoverHighlightTimer = undefined;
+            this.clearHoverHighlight();
+        }, 1500);
+    }
+
+    private clearHoverHighlight(): void {
+        if (!this.hoverHighlight) return;
+        for (const editor of vscode.window.visibleTextEditors) {
+            if (editor.document.uri.scheme !== ResultsDocumentProvider.scheme) continue;
+            editor.setDecorations(this.hoverHighlight, []);
+        }
     }
 
     /** Called whenever the panel produces new results or changes its layout. */
@@ -236,6 +261,10 @@ export class ResultsView implements vscode.Disposable {
     }
 
     public dispose(): void {
+        if (this.hoverHighlightTimer) clearTimeout(this.hoverHighlightTimer);
+        this.hoverHighlightTimer = undefined;
+        this.hoverHighlight?.dispose();
+        this.hoverHighlight = undefined;
         this.disposables.forEach(disposable => disposable.dispose());
         this.disposables.length = 0;
     }
