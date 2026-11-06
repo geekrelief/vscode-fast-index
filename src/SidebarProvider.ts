@@ -88,6 +88,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     /** Set by the extension so the bottom panel can mirror the preview. */
     public onPreview?: (file: string, line: number, query: string, isRegex: boolean, isMatchCase: boolean) => void;
 
+    /** Set by the extension so the results tab can re-render with the panel. */
+    public onResults?: (snapshot: { query: string; isRegex: boolean; isMatchCase: boolean; filter: string; include: string[]; exclude: string[]; rows: any[] }) => void;
+
     constructor(
         private readonly _extensionUri: vscode.Uri,
         private readonly indexer: ProjectIndexer,
@@ -183,6 +186,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     log(`search "${value}" reason=${reason || 'unknown'} case=${!!isMatchCase} regex=${!!isRegex} include=[${(include || []).join(',')}] exclude=[${(exclude || []).join(',')}] filter="${filter || ''}" -> ${files.length} files, ${snippets.length} rows`);
                     this.lastSnapshot = { query: value, isRegex: !!isRegex, isMatchCase: !!isMatchCase, filter: filter || '', include: include || [], exclude: exclude || [], rows: snippets };
                     this._view?.webview.postMessage({ type: 'results', value: snippets });
+                    this.onResults?.(this.lastSnapshot);
                     break;
                 }
                 case 'replaceSingle': {
@@ -191,6 +195,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const files = this.indexer.search(query, isRegex, { include, exclude });
                     const snippets = await this.getSnippets(files, query, isMatchCase, isRegex, filter);
                     this._view?.webview.postMessage({ type: 'results', value: snippets });
+                    this.lastSnapshot = { query, isRegex: !!isRegex, isMatchCase: !!isMatchCase, filter: filter || '', include: include || [], exclude: exclude || [], rows: snippets };
+                    this.onResults?.(this.lastSnapshot);
                     break;
                 }
                 case 'replaceAll': {
@@ -199,6 +205,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const files = this.indexer.search(query, isRegex, { include, exclude });
                     const snippets = await this.getSnippets(files, query, isMatchCase, isRegex, filter);
                     this._view?.webview.postMessage({ type: 'results', value: snippets });
+                    this.lastSnapshot = { query, isRegex: !!isRegex, isMatchCase: !!isMatchCase, filter: filter || '', include: include || [], exclude: exclude || [], rows: snippets };
+                    this.onResults?.(this.lastSnapshot);
                     break;
                 }
                 case 'ready': {
@@ -248,6 +256,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 }
                 case 'viewMode': {
                     this.viewMode = data.value === 'flat' ? 'flat' : 'tree';
+                    // The results tab renders the same order the panel shows.
+                    if (this.lastSnapshot) this.onResults?.(this.lastSnapshot);
                     break;
                 }
                 case 'lock': {

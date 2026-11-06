@@ -77,7 +77,7 @@ The preview surfaces share `src/theme.ts`, which resolves `workbench.colorTheme`
 
 ## Changelog — current development session
 
-Everything below landed in one session (0.3.6 → 0.7.5).
+Everything below landed in one session (0.3.6 → 0.8.0).
 
 ### Search UI
 
@@ -105,9 +105,11 @@ Everything below landed in one session (0.3.6 → 0.7.5).
 
 ### Results in the editor
 
-* New **Fast Index: Open Results in Editor** command (book icon) that renders the results into a **virtual document** in a real editor tab: full theme, syntax highlighting, folding, find.
-* Matches are grouped by file, ordered **depth-first like the tree view** (or in search order in list mode), with configurable context lines, `>` on the match line and blank lines between entries.
-* Each match is a **document link**: Ctrl+click jumps to that file and line.
+* **Fast Index: Open Results in Editor** renders the results into a **virtual document** (`fast-index-results:` scheme) in a real editor tab, so it inherits the normal editor theme, font, find widget and folding.
+* The tab is **driven by the panel**: one stable tab is rewritten in place on every new search (including replacements and Tree/List switches), so the query, filters and context lines are always the panel's current ones — there are no controls inside the document.
+* Result lines are **syntax coloured from the active theme's own `tokenColors`** (the same extractor the preview panel uses) by a small per-language lexer covering C/C++/C#/Python/JS/TS: keywords, types, calls, strings, numbers, comments and preprocessor directives.
+* The matched text and its line are highlighted with the editor's find colours (`editor.findMatchHighlightBackground`, `editor.findMatchBorder`), so the highlight follows the theme too.
+* Every match line is a **document link**: hovering shows *Follow link (Ctrl+Click)*, and following it — or simply **clicking the line** — opens a **peek** of the source location rather than another tab.
 
 ### Follow-editor / prefill
 
@@ -128,5 +130,5 @@ Everything below landed in one session (0.3.6 → 0.7.5).
 
 ### Internal
 
-* Split out `src/theme.ts` (theme token-colour resolution), `src/PreviewProvider.ts` (bottom-panel preview), `src/ResultsDocumentProvider.ts` (results document + depth-first ordering + links) and `src/log.ts` (output channel).
+* Split out `src/theme.ts` (theme token-colour resolution), `src/PreviewProvider.ts` (bottom-panel preview), `src/ResultsDocumentProvider.ts` (results document model, depth-first ordering, links), `src/resultsView.ts` (results tab lifecycle, click-to-peek, panel-driven refresh), `src/syntax.ts` (per-language tokenizer + theme-coloured decorations) and `src/log.ts` (output channel).
 * Pinned searches, lock state and layout stored through the webview/host state as appropriate.

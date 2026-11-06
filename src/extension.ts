@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { ProjectIndexer } from './indexer';
 import { SidebarProvider } from './SidebarProvider';
 import { PreviewProvider } from './PreviewProvider';
-import { ResultsDocumentProvider, ResultsLinkProvider, orderRowsDepthFirst } from './ResultsDocumentProvider';
+import { ResultsView } from './resultsView';
 import { setLogChannel, log } from './log';
 
 /** Remembers that this workspace was indexed successfully, independent of the cache files. */
@@ -48,109 +48,13 @@ export async function activate(context: vscode.ExtensionContext) {
 
     const sidebarProvider = new SidebarProvider(context.extensionUri, indexer, rememberSkipped, context.workspaceState);
 
-    // Search results can be opened as a real editor tab (full theme + highlighting).
-    const resultsProvider = new ResultsDocumentProvider();
-    context.subscriptions.push(
-        vscode.workspace.registerTextDocumentContentProvider(ResultsDocumentProvider.scheme, resultsProvider),
-        vscode.languages.registerDocumentLinkProvider(
-            { scheme: ResultsDocumentProvider.scheme },
-            new ResultsLinkProvider(uri => resultsProvider.rows(uri))
-        ),
-        vscode.commands.registerCommand('vscode-fast-index.openAt', async (file: string, line: number) => {
-            try {
-                const document = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
-                const editor = await vscode.window.showTextDocument(document, { preview: true });
-                const position = new vscode.Position(Math.max(0, Number(line) || 0), 0);
-                editor.selection = new vscode.Selection(position, position);
-                editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
-            } catch {
-                vscode.window.showInformationMessage('Fast Index: could not open ' + file);
-            }
-        }),
-        vscode.commands.registerCommand('vscode-fast-index.openResultsInEditor', async () => {
-            const snapshot = sidebarProvider.getResultsSnapshot();
-            if (!snapshot || snapshot.rows.length === 0) {
-                vscode.window.showInformationMessage('Fast Index: run a search first.');
-                return;
-            }
-
-            const configured = vscode.workspace.getConfiguration('fastIndex').get<number>('previewContextLines');
-            const radius = Math.max(0, Math.min(50, Math.round(typeof configured === 'number' ? configured : 2)));
-
-            // Tree mode lists depth first; the flat list keeps the search order.
-            const rows = sidebarProvider.getViewMode() === 'tree'
-                ? orderRowsDepthFirst(snapshot.rows as any[])
-                : (snapshot.rows as any[]).slice();
-
-            const header = [
-                'Search: ' + snapshot.query,
-                [
-                    snapshot.include.length ? 'only: ' + snapshot.include.join(', ') : '',
-                    snapshot.exclude.length ? 'skip: ' + snapshot.exclude.join(', ') : '',
-                    snapshot.filter ? 'filter: ' + snapshot.filter : ''
-                ].filter(Boolean).join('  ·  '),
-                rows.length + ' matches in ' + new Set(rows.map((row: any) => row.fileName)).size + ' files ('
-                    + radius + ' context line' + (radius === 1 ? '' : 's') + ' each side)',
-                'Generated view - Ctrl+click a match (marked >) to open it there.'
-            ].filter(Boolean).join('\n');
-
-            const cache = new Map<string, string[]>();
-            const readLines = async (file: string): Promise<string[]> => {
-                if (cache.has(file)) return cache.get(file)!;
-                let lines: string[] = [];
-                try {
-                    const open = vscode.workspace.textDocuments.find(document => document.uri.fsPath === file);
-                    const document = open ?? await vscode.workspace.openTextDocument(vscode.Uri.file(file));
-                    lines = document.getText().split('\n');
-                } catch {
-                    lines = [];
-                }
-                cache.set(file, lines);
-                return lines;
-            };
-
-            const out: string[] = [header, ''];
-            let currentFile = '';
-
-            for (const row of rows) {
-                if (row.fileName !== currentFile) {
-                    currentFile = row.fileName;
-                    if (out.length > 2) out.push('');
-                    out.push(currentFile);
-                }
-
-                out.push('');
-                const lines = await readLines(row.file);
-                if (lines.length === 0) {
-                    out.push('  ' + String(row.line + 1).padStart(4) + '> ' + String(row.text ?? ''));
-                    continue;
-                }
-
-                const start = Math.max(0, row.line - radius);
-                const end = Math.min(lines.length, row.line + radius + 1);
-                for (let index = start; index < end; index++) {
-                    const marker = index === row.line ? '>' : ':';
-                    out.push('  ' + String(index + 1).padStart(4) + marker + ' ' + lines[index]);
-                }
-            }
-
-            const uri = ResultsDocumentProvider.buildUri(Date.now().toString(36));
-            resultsProvider.set(uri, out.join('\n') + '\n', rows);
-
-            const document = await vscode.workspace.openTextDocument(uri);
-            const first = rows[0].fileName || '';
-            const language = /\.py$/i.test(first) ? 'python'
-                : /\.(cs)$/i.test(first) ? 'csharp'
-                : /\.(c|cc|cpp|cxx|h|hh|hpp|hxx|inl)$/i.test(first) ? 'cpp'
-                : 'plaintext';
-            try {
-                await vscode.languages.setTextDocumentLanguage(document, language);
-            } catch {
-                /* keep plaintext */
-            }
-            await vscode.window.showTextDocument(document, { preview: true });
-        })
+    // The results tab mirrors the sidebar: it re-renders on every new search.
+    const resultsView = new ResultsView(
+        () => sidebarProvider.getResultsSnapshot() as any,
+        () => sidebarProvider.getViewMode()
     );
+    context.subscriptions.push({ dispose: () => resultsView.dispose() }, ...resultsView.register());
+    sidebarProvider.onResults = () => void resultsView.refresh();
     // The preview also lives in a bottom panel, next to the terminal.
     const previewProvider = new PreviewProvider(context.extensionUri);
     sidebarProvider.onPreview = (file: string, line: number, query: string, isRegex: boolean, isMatchCase: boolean) => {
