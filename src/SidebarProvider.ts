@@ -196,15 +196,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     public showSettings(): void {
-        // Settings is its own section: the button toggles it, so clicking again
-        // collapses it and the sections below move up.
+        // Focus only: hiding the pane (toggleVisibility) makes the workbench
+        // re-add it at its default size, which throws away the section heights and
+        // collapsed state that VS Code persists in views.customizations.
         void (async () => {
-            for (const command of ['fast-index.settings.toggleVisibility', 'fast-index.settings.focus']) {
+            for (const command of ['fast-index.settings.focus', 'workbench.view.extension.fast-index-explorer']) {
                 try {
                     await vscode.commands.executeCommand(command);
                     return;
                 } catch {
-                    /* try the next one: older hosts may not register the toggle */
+                    /* try the next one: older hosts may not have the focus command */
                 }
             }
         })();

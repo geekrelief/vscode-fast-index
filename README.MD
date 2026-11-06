@@ -83,7 +83,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog
 
-### 0.8.0 → 0.21.0 — native results tree, hover jump, pinned section, settings section, results editor and settings fixes
+### 0.8.0 → 0.21.1 — native results tree, hover jump, pinned section, settings section, results editor and settings fixes
 
 #### Results tab in the editor
 
@@ -113,7 +113,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 #### Settings section (0.20.0)
 
-* Settings is now **its own section** at the bottom of the Fast Index container, under Pinned Searches, instead of a panel toggled inside the search view. It is a webview view that renders the same form (one shared markup and stylesheet), so every field, the Reindex button, the stale banner and the cached-indexes list behave exactly as before; the section is collapsible like any other, and the ⚙️ title-bar button **toggles** it — `fast-index.settings.toggleVisibility` — so clicking it again collapses the section and the sections below move down.
+* Settings is now **its own section** at the bottom of the Fast Index container, under Pinned Searches, instead of a panel toggled inside the search view. It is a webview view that renders the same form (one shared markup and stylesheet), so every field, the Reindex button, the stale banner and the cached-indexes list behave exactly as before; the section is collapsible like any other, and the ⚙️ title-bar button **focuses** it (`fast-index.settings.focus`). It deliberately does not hide the pane: hiding makes the workbench re-add it at its default height, so the section heights and collapsed state you set — which VS Code persists itself in `views.customizations`, at application scope — would be lost. Collapse or resize sections with their own chevrons and drag handles; that layout survives reloads, workspaces and the gear button.
 * The search panel no longer renders the form at all — the markup, the save logic and the cache list were **removed** from it, not just hidden, so opening the container shows Search, Results, Pinned Searches, Settings.
 * Messages from both webviews go through one handler and replies are broadcast to both, so saving a setting updates the section and the panel alike.
 
@@ -143,6 +143,12 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 * **Hover jump works through `resolveTreeItem`.** A `TreeView` has no hover event, but VS Code calls the provider's `resolveTreeItem(item, element)` *when the pointer rests on a row*, because the row's `tooltip` is left undefined and the contract says it is "called on hover to resolve the tooltip if it is undefined". Match rows now never return a tooltip — the popup over the results was pure noise — so the call is used purely as the hover signal that jumps the results editor. VS Code memoises that resolution per row, so the provider refreshes just that row (element-scoped, ~300 ms later and throttled to once a second) to clear the cache and let the next hover fire again; the provider implements `getParent` so VS Code can walk from the row to its parent for that scoped refresh. Folder and file rows keep eager tooltips and never trigger it. Timing is `workbench.hover.delay`; selecting a match still jumps as well.
 * Directory rows carry **no icon** — the tree is a result list, not a file browser. File names are **bold**; directory nodes are semi-bold (600) so the two levels stay distinguishable.
 * New **`fastIndex.showContextLine`** toggle to hide the matched line under each result for a compact file-and-line list.
+
+#### Section layout (0.21.1)
+
+* Section heights, border positions and collapsed state are **workbench-owned**: VS Code stores them per view in `views.customizations` at application scope (`ViewDescriptorService`), so they persist across sessions and workspaces without the extension doing anything.
+* The extension API has no way to set a view's size or collapsed state, so the only code that could destroy that layout is our own. The ⚙️ button therefore **focuses** the Settings section instead of hiding it — `toggleVisibility` was removed, because re-showing a hidden pane puts it back at its default height.
+* `fast-index.results` keeps its own expansion state per workspace through stable `TreeItem.id`s, so a collapsed directory stays collapsed after a reload.
 
 #### Panel controls (0.18.0)
 
