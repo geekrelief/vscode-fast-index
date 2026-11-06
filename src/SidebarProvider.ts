@@ -1025,6 +1025,35 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 
                 <div class="settings-panel" id="settingsPanel">
                     <section class="settings-group">
+                        <h3 class="settings-group-title">Search Settings</h3>
+                        <div class="setting-item">
+                            <label>Max Search Results</label>
+                            <input type="number" id="confMaxResults" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Recent Searches Remembered (0 = off)</label>
+                            <input type="number" id="confMaxRecent" min="0" max="100" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Hover Jump Delay (ms, 0 = instant)</label>
+                            <input type="number" id="confHoverDelay" min="0" step="50" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Results Context Lines (above and below)</label>
+                            <input type="number" id="confContextLines" min="0" max="50" step="1" />
+                        </div>
+                        <div class="setting-item setting-check">
+                            <label><input type="checkbox" id="confFollowEditor" /> Auto Search: Follows text editor cursor and selection</label>
+                        </div>
+                        <div class="setting-item setting-check">
+                            <label><input type="checkbox" id="confPersistPinned" /> Keep pinned searches between sessions</label>
+                        </div>
+                        <div class="setting-item setting-check">
+                            <label><input type="checkbox" id="confAutoOpenResults" /> Open the results editor automatically when a search finds matches</label>
+                        </div>
+                    </section>
+
+                    <section class="settings-group">
                         <h3 class="settings-group-title">Indexing</h3>
                         <p class="settings-group-note">These shape the index itself. Changing them makes the existing index stale until you reindex.</p>
                         <div class="setting-item">
@@ -1044,35 +1073,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             <button id="undoIndexBtn" class="link-btn" title="Restore the include/exclude/size settings the current index was built with">Undo changes</button>
                         </div>
                         <button id="reindexBtn" title="Rebuild the index with the current settings.">🔁 Reindex</button>
-                    </section>
-
-                    <section class="settings-group">
-                        <h3 class="settings-group-title">Results window</h3>
-                        <div class="setting-item">
-                            <label>Max Search Results</label>
-                            <input type="number" id="confMaxResults" />
-                        </div>
-                        <div class="setting-item">
-                            <label>Recent Searches Remembered (0 = off)</label>
-                            <input type="number" id="confMaxRecent" min="0" max="100" />
-                        </div>
-                        <div class="setting-item">
-                            <label>Hover Jump Delay (ms, 0 = instant)</label>
-                            <input type="number" id="confHoverDelay" min="0" step="50" />
-                        </div>
-                        <div class="setting-item">
-                            <label>Results Context Lines (above and below)</label>
-                            <input type="number" id="confContextLines" min="0" max="50" step="1" />
-                        </div>
-                        <div class="setting-item setting-check">
-                            <label><input type="checkbox" id="confFollowEditor" /> Follow editor selection / word under cursor</label>
-                        </div>
-                        <div class="setting-item setting-check">
-                            <label><input type="checkbox" id="confPersistPinned" /> Keep pinned searches between sessions</label>
-                        </div>
-                        <div class="setting-item setting-check">
-                            <label><input type="checkbox" id="confAutoOpenResults" /> Open the results editor automatically when a search finds matches</label>
-                        </div>
                     </section>
 
                     <section class="settings-group">

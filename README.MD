@@ -39,7 +39,7 @@ Instead of searching text "on the fly" for every query, the plugin builds an inv
 
 ## Configuration
 
-You can customize the extension directly via the **⚙️** title-bar button. The panel is split into three bordered groups — **Indexing**, **Results window** and **Cached indexes** — so it is obvious which controls change the index and which only change what the results window does. Every field is applied as you edit it — there is no Save button: text and number fields save after a short pause (or immediately on `Enter`), checkboxes save the moment you toggle them.
+You can customize the extension directly via the **⚙️** title-bar button. The panel is split into three bordered groups — **Search Settings**, **Indexing** and **Cached indexes** — so it is obvious which controls change the index and which only change how searching behaves. Every field is applied as you edit it — there is no Save button: text and number fields save after a short pause (or immediately on `Enter`), checkboxes save the moment you toggle them.
 
 Three of these settings shape the index itself: **Include Extensions**, **Exclude Patterns** and **Max File Size**. Editing them cannot change the index that already exists, so the panel shows a **stale-index banner** naming the changed fields, with an **Undo changes** button that restores the values the current index was built with. **Reindex** commits them. If you leave the settings view or close the panel with such a change still pending, a confirmation asks whether to **Reindex now**, **Reject changes** or **Keep for now** (asking only once per distinct set of values).
 
@@ -51,7 +51,7 @@ Three of these settings shape the index itself: **Include Extensions**, **Exclud
 * **Results Context Lines:** Lines shown above and below each match in the results editor (default `2`).
 * **Keep pinned searches between sessions:** on/off (default on).
 * **Open the results editor automatically:** on/off (default off, also `fastIndex.autoOpenResults`). When on, a search that finds matches reopens the results tab if you closed it — without stealing focus, so you can keep typing in the panel.
-* **Follow editor selection / word under cursor:** on/off.
+* **Auto Search: Follows text editor cursor and selection:** on/off.
 * **Cached indexes:** The settings panel lists every cached workspace folder with its build date and size. Tick the ones you want to drop (or **Select all**) and press **Delete selected**; a confirmation dialog is shown before anything is deleted. **Reindex selected** re-scans only the ticked folders and leaves the other caches untouched. Caches whose folder no longer exists are marked **missing**, and **Delete stale** removes all of them in one confirmed step. A deleted folder is re-indexed only when you run **Fast Index: Build Project Index**.
 
 ## Where the index lives
@@ -78,7 +78,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog
 
-### 0.8.0 → 0.11.1 — results editor, preview removal, prefill and settings fixes
+### 0.8.0 → 0.11.2 — results editor, preview removal, prefill and settings fixes
 
 #### Results tab in the editor
 
@@ -108,7 +108,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 #### Settings
 
-* The panel is grouped into bordered sections — **Indexing** (include extensions, exclude patterns, max file size, Reindex and the stale banner), **Results window** (result limit, recent searches, hover jump, context lines and the behaviour toggles) and **Cached indexes** — so index-shaping controls are never mixed in with view controls.
+* The panel is grouped into bordered sections — **Search Settings** (result limit, recent searches, hover jump, context lines and the behaviour toggles, including the renamed *Auto Search: Follows text editor cursor and selection*), **Indexing** (include extensions, exclude patterns, max file size, Reindex and the stale banner) and **Cached indexes** — so index-shaping controls are never mixed in with search controls.
 * Every settings field applies **as you edit it**: text and number fields debounce ~350 ms (or flush immediately on `Enter`), checkboxes apply at once. There is no Save button to forget.
 * **Save & Reindex** is now just **Reindex**. Index-affecting edits (include extensions, exclude patterns, max file size) no longer rebuild the index behind your back while you type.
 * The panel tracks what the last successful build actually consumed, so it can say the index is **stale** rather than guessing: a banner names the changed fields and offers **Undo changes** to restore the indexed values, next to **Reindex**.
