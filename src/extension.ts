@@ -84,6 +84,23 @@ export async function activate(context: vscode.ExtensionContext) {
     );
     context.subscriptions.push({ dispose: () => resultsView.dispose() }, ...resultsView.register());
     context.subscriptions.push(resultsTreeView, { dispose: () => resultsTree.dispose() });
+    // Hover jump: VS Code resolves a match's tooltip only when the pointer rests on
+    // the row, which is the one hover signal a TreeView offers.
+    let hoverTimer: ReturnType<typeof setTimeout> | undefined;
+    resultsTree.onHoverMatch = (row) => {
+        const configured = vscode.workspace.getConfiguration('fastIndex').get<number>('hoverJumpDelay');
+        const delay = Math.max(0, Math.min(10000, typeof configured === 'number' ? configured : 0));
+        if (hoverTimer) clearTimeout(hoverTimer);
+        if (delay === 0) {
+            resultsView.reveal(row.file, row.line);
+            return;
+        }
+        hoverTimer = setTimeout(() => {
+            hoverTimer = undefined;
+            resultsView.reveal(row.file, row.line);
+        }, delay);
+    };
+
     // Selecting a match in the tree scrolls the results tab to the same hit.
     context.subscriptions.push(resultsTreeView.onDidChangeSelection((event) => {
         const node = event.selection[0];

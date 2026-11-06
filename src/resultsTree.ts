@@ -53,6 +53,9 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
     private readonly emitter = new vscode.EventEmitter<TreeNode | undefined>();
     public readonly onDidChangeTreeData = this.emitter.event;
 
+    /** Fired when VS Code resolves a match's tooltip, i.e. when the pointer rests on it. */
+    public onHoverMatch?: (row: ResultRow) => void;
+
     /** Rebuilds the tree; called whenever the panel produces new results. */
     public setResults(rows: ResultRow[], showContextLine: boolean): void {
         this.showContextLine = showContextLine;
@@ -79,7 +82,8 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
             item.id = node.id;
             item.contextValue = 'match';
             item.description = this.showContextLine ? String(node.row.text || '').trim() : undefined;
-            item.tooltip = `${node.fileName}:${node.row.line + 1}\n${node.row.text || ''}`;
+            // Deliberately no tooltip: VS Code only asks resolveTreeItem for it when the
+            // pointer rests on the row, which is exactly the hover signal we need.
             item.iconPath = new vscode.ThemeIcon('circle-small-filled');
             item.command = {
                 command: 'vscode-fast-index.openMatch',
@@ -105,6 +109,19 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
         item.description = String(node.count);
         item.tooltip = node.path;
         item.iconPath = new vscode.ThemeIcon('folder');
+        return item;
+    }
+
+    /**
+     * Called by VS Code when a row's tooltip is about to be shown, which happens
+     * only when the pointer rests on it. This is the one hover signal a TreeView
+     * offers, so it drives the results-editor jump.
+     */
+    public resolveTreeItem(item: vscode.TreeItem, element: TreeNode): vscode.ProviderResult<vscode.TreeItem> {
+        if (element.kind === 'match') {
+            this.onHoverMatch?.(element.row);
+            item.tooltip = `${element.fileName}:${element.row.line + 1}\n${element.row.text || ''}`;
+        }
         return item;
     }
 
