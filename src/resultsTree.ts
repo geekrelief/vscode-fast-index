@@ -58,6 +58,8 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
 
     /** Throttles the refresh that makes a row resolvable again, so hovers cannot loop. */
     private lastHoverRefresh = 0;
+    /** Relative path of the file whose rows are current highlighted, if any. */
+    private activeFile?: string;
     /** Parent links, so a single row can be refreshed instead of the whole tree. */
     private readonly parentOf = new WeakMap<TreeNode, TreeNode>();
 
@@ -66,6 +68,30 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
         this.showContextLine = showContextLine;
         this.roots = this.build(rows);
         this.emitter.fire(undefined);
+    }
+
+    /**
+     * Marks the file a hovered/selected match belongs to. Its row and every
+     * ancestor directory are highlighted, the way the Explorer marks the active
+     * file, and the highlight moves when another file is hovered.
+     */
+    public setActiveMatch(row?: ResultRow): void {
+        const file = row ? String(row.fileName || '') : undefined;
+        if (file === this.activeFile) return;
+        this.activeFile = file;
+        this.emitter.fire(undefined);
+    }
+
+    private isActive(node: DirNode | FileNode): boolean {
+        if (!this.activeFile) return false;
+        if (node.kind === 'file') return node.path === this.activeFile;
+        return this.activeFile.startsWith(node.path + '/');
+    }
+
+    /** Highlights make the label bold in the list's highlight colour. */
+    private labelFor(node: DirNode | FileNode): string | vscode.TreeItemLabel {
+        if (!this.isActive(node)) return node.name;
+        return { label: node.name, highlights: [[0, node.name.length]] };
     }
 
     public setShowContextLine(value: boolean): void {
@@ -110,7 +136,7 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
         }
 
         if (node.kind === 'file') {
-            const item = new vscode.TreeItem(node.name, vscode.TreeItemCollapsibleState.Expanded);
+            const item = new vscode.TreeItem(this.labelFor(node), vscode.TreeItemCollapsibleState.Expanded);
             item.id = node.id;
             item.contextValue = 'file';
             item.description = String(node.rows.length);
@@ -119,7 +145,7 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
             return item;
         }
 
-        const item = new vscode.TreeItem(node.name, vscode.TreeItemCollapsibleState.Expanded);
+        const item = new vscode.TreeItem(this.labelFor(node), vscode.TreeItemCollapsibleState.Expanded);
         item.id = node.id;
         item.contextValue = 'dir';
         item.description = String(node.count);

@@ -87,7 +87,12 @@ export async function activate(context: vscode.ExtensionContext) {
     // Hover jump: VS Code resolves a match's tooltip only when the pointer rests on
     // the row, which is the one hover signal a TreeView offers. Its timing is
     // workbench.hover.delay; there is no per-widget override.
-    resultsTree.onHoverMatch = (row) => resultsView.reveal(row.file, row.line);
+    resultsTree.onHoverMatch = (row) => {
+        resultsView.reveal(row.file, row.line);
+        // Light up that file and its ancestor directories, like the Explorer does
+        // for the active file.
+        resultsTree.setActiveMatch(row);
+    };
 
     // Selecting a match in the tree scrolls the results tab to the same hit.
     context.subscriptions.push(resultsTreeView.onDidChangeSelection((event) => {
