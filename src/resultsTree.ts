@@ -58,30 +58,26 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
 
     /** Throttles the refresh that makes a row resolvable again, so hovers cannot loop. */
     private lastHoverRefresh = 0;
-    /** Relative path of the file whose rows are current highlighted, if any. */
+    /** Relative path of the file whose rows are currently highlighted, if any. */
     private activeFile?: string;
+    /** Id of the match row the pointer is on, so it is coloured too. */
+    private activeMatchId?: string;
     /** Parent links, so a single row can be refreshed instead of the whole tree. */
     private readonly parentOf = new WeakMap<TreeNode, TreeNode>();
+    /** Path index, to find the nodes of the active path without walking the tree. */
+    private readonly nodeByPath = new Map<string, DirNode | FileNode>();
+    /** Match nodes by id, so a stale colour can be cleared without walking the tree. */
+    private readonly matchById = new Map<string, MatchNode>();
 
     /** Rebuilds the tree; called whenever the panel produces new results. */
     public setResults(rows: ResultRow[], showContextLine: boolean): void {
         this.showContextLine = showContextLine;
+        this.activeFile = undefined;
+        this.activeMatchId = undefined;
+        this.nodeByPath.clear();
+        this.matchById.clear();
         this.roots = this.build(rows);
         this.emitter.fire(undefined);
-    }
-
-    /**
-     * Marks the file a hovered/selected match belongs to. Its row and every
-     * ancestor directory are highlighted, the way the Explorer marks the active
-     * file, and the highlight moves when another file is hovered.
-     */
-    public setActiveMatch(row?: ResultRow): void {
-        const file = row ? String(row.fileName || '') : undefined;
-        if (file === this.activeFile) return;
-        this.activeFile = file;
-        // This is called from resolveTreeItem, and the contract forbids firing
-        // onDidChangeTreeData synchronously there, so defer it to the next tick.
-        setTimeout(() => this.emitter.fire(undefined), 0);
     }
 
     private isActive(node: DirNode | FileNode): boolean {
@@ -90,10 +86,52 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
         return this.activeFile.startsWith(node.path + '/');
     }
 
-    /** Highlights make the label bold in the list's highlight colour. */
+    /** Colour comes from the label's highlights: the theme's list highlight colour. */
     private labelFor(node: DirNode | FileNode): string | vscode.TreeItemLabel {
         if (!this.isActive(node)) return node.name;
         return { label: node.name, highlights: [[0, node.name.length]] };
+    }
+
+    /** The file row and its ancestors, for the highlighted path. */
+    private pathNodes(file?: string): TreeNode[] {
+        if (!file) return [];
+        const nodes: TreeNode[] = [];
+        const fileNode = this.nodeByPath.get(file);
+        if (fileNode) nodes.push(fileNode);
+        const parts = file.split('/');
+        for (let i = parts.length - 1; i > 0; i--) {
+            const dir = this.nodeByPath.get(parts.slice(0, i).join('/'));
+            if (dir) nodes.push(dir);
+        }
+        return nodes;
+    }
+
+    /**
+     * Colours the hovered match row, its file and its ancestor directories. Fires
+     * element-scoped refreshes (deferred: the provider contract forbids firing
+     * onDidChangeTreeData from inside resolveTreeItem), touching only the rows
+     * whose colour actually changes.
+     */
+    private markActive(element: MatchNode): void {
+        const file = String(element.row.fileName || '');
+        if (file === this.activeFile && element.id === this.activeMatchId) return;
+
+        const fileChanged = this.activeFile !== file;
+        const stale: TreeNode[] = [];
+        if (fileChanged) stale.push(...this.pathNodes(this.activeFile));
+        const previousMatch = this.activeMatchId ? this.matchById.get(this.activeMatchId) : undefined;
+        if (previousMatch && previousMatch.id !== element.id) stale.push(previousMatch);
+
+        this.activeFile = file;
+        this.activeMatchId = element.id;
+
+        const fresh: TreeNode[] = [element];
+        if (fileChanged) fresh.push(...this.pathNodes(file));
+
+        setTimeout(() => {
+            for (const node of stale) this.emitter.fire(node);
+            for (const node of fresh) this.emitter.fire(node);
+        }, 0);
     }
 
     public setShowContextLine(value: boolean): void {
@@ -109,6 +147,7 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
             return node.rows.map((row) => {
                 const match = this.matchNode(row, node.path);
                 this.parentOf.set(match, node);
+                this.matchById.set(match.id, match);
                 return match;
             });
         }
@@ -122,7 +161,11 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
 
     public getTreeItem(node: TreeNode): vscode.TreeItem {
         if (node.kind === 'match') {
-            const item = new vscode.TreeItem(`line ${node.row.line + 1}`, vscode.TreeItemCollapsibleState.None);
+            const text = `line ${node.row.line + 1}`;
+            const label = node.id === this.activeMatchId
+                ? { label: text, highlights: [[0, text.length]] as [number, number][] }
+                : text;
+            const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
             item.id = node.id;
             item.contextValue = 'match';
             item.description = this.showContextLine ? String(node.row.text || '').trim() : undefined;
@@ -138,25 +181,21 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
         }
 
         if (node.kind === 'file') {
-            const active = this.isActive(node);
             const item = new vscode.TreeItem(this.labelFor(node), vscode.TreeItemCollapsibleState.Expanded);
             item.id = node.id;
             item.contextValue = 'file';
             item.description = String(node.rows.length);
             item.tooltip = node.path;
             item.resourceUri = vscode.Uri.file(node.file);
-            // The icon carries the highlight even where label emphasis is ignored.
-            if (active) item.iconPath = new vscode.ThemeIcon('file', new vscode.ThemeColor('list.highlightForeground'));
             return item;
         }
 
-        const active = this.isActive(node);
+        // No folder icons: the tree is a result list, not a file browser.
         const item = new vscode.TreeItem(this.labelFor(node), vscode.TreeItemCollapsibleState.Expanded);
         item.id = node.id;
         item.contextValue = 'dir';
         item.description = String(node.count);
         item.tooltip = node.path;
-        item.iconPath = new vscode.ThemeIcon(active ? 'folder-active' : 'folder');
         return item;
     }
 
@@ -174,6 +213,7 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
         if (element.kind !== 'match') return item;
 
         this.onHoverMatch?.(element.row);
+        this.markActive(element);
 
         const now = Date.now();
         if (now - this.lastHoverRefresh > 1000) {
@@ -212,19 +252,22 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
                     children: kids
                 };
                 for (const kid of kids) this.parentOf.set(kid, dirNode);
+                this.nodeByPath.set(dirPath, dirNode);
                 children.push(dirNode);
             }
             for (const name of Array.from(builder.files.keys()).sort((a, b) => a.localeCompare(b))) {
                 const filePath = prefix ? prefix + '/' + name : name;
                 const fileRows = builder.files.get(name)!.slice().sort((a, b) => a.line - b.line);
-                children.push({
+                const fileNode: FileNode = {
                     kind: 'file',
                     id: 'file:' + filePath,
                     name,
                     path: filePath,
                     file: fileRows[0].file,
                     rows: fileRows
-                });
+                };
+                this.nodeByPath.set(filePath, fileNode);
+                children.push(fileNode);
             }
             return children;
         };
