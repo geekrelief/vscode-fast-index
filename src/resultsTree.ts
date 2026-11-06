@@ -56,6 +56,9 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
     /** Fired when VS Code resolves a match's tooltip, i.e. when the pointer rests on it. */
     public onHoverMatch?: (row: ResultRow) => void;
 
+    /** Throttles the refresh that makes a row resolvable again, so hovers cannot loop. */
+    private lastHoverRefresh = 0;
+
     /** Rebuilds the tree; called whenever the panel produces new results. */
     public setResults(rows: ResultRow[], showContextLine: boolean): void {
         this.showContextLine = showContextLine;
@@ -116,11 +119,22 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
      * Called by VS Code when a row's tooltip is about to be shown, which happens
      * only when the pointer rests on it. This is the one hover signal a TreeView
      * offers, so it drives the results-editor jump.
+     *
+     * VS Code memoises the resolution per row, so the same row would only ever be
+     * resolved once. A throttled refresh after the jump replaces the row, which
+     * clears that cache and lets the next hover fire again. No tooltip is returned:
+     * an empty popup over the results is pure noise.
      */
     public resolveTreeItem(item: vscode.TreeItem, element: TreeNode): vscode.ProviderResult<vscode.TreeItem> {
-        if (element.kind === 'match') {
-            this.onHoverMatch?.(element.row);
-            item.tooltip = `${element.fileName}:${element.row.line + 1}\n${element.row.text || ''}`;
+        if (element.kind !== 'match') return item;
+
+        this.onHoverMatch?.(element.row);
+
+        const now = Date.now();
+        if (now - this.lastHoverRefresh > 1000) {
+            this.lastHoverRefresh = now;
+            // Refresh after the hover has been handled, so it does not interrupt the jump.
+            setTimeout(() => this.emitter.fire(undefined), 300);
         }
         return item;
     }
