@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import { ProjectIndexer } from './indexer';
 import { SidebarProvider } from './SidebarProvider';
-import { PreviewProvider } from './PreviewProvider';
 import { ResultsView } from './resultsView';
 import { setLogChannel, log } from './log';
 
@@ -60,16 +59,10 @@ export async function activate(context: vscode.ExtensionContext) {
             && vscode.workspace.getConfiguration('fastIndex').get<boolean>('autoOpenResults') === true;
         void resultsView.sync(autoOpen);
     };
-    // The preview also lives in a bottom panel, next to the terminal.
-    const previewProvider = new PreviewProvider(context.extensionUri);
-    sidebarProvider.onPreview = (file: string, line: number, query: string, isRegex: boolean, isMatchCase: boolean) => {
-        void previewProvider.show(file, line, query, isRegex, isMatchCase);
-    };
+    // Resting on a result scrolls the results tab to that hit (no preview pane).
+    sidebarProvider.onHover = (file: string, line: number) => resultsView.reveal(file, line);
 
     context.subscriptions.push(
-        vscode.window.registerWebviewViewProvider(PreviewProvider.viewType, previewProvider, {
-            webviewOptions: { retainContextWhenHidden: true }
-        }),
         vscode.commands.registerCommand('vscode-fast-index.lockResults', () => sidebarProvider.setLock(true)),
         vscode.commands.registerCommand('vscode-fast-index.showLog', () => searchLog.show(true)),
         vscode.commands.registerCommand('vscode-fast-index.unlockResults', () => sidebarProvider.setLock(false)),
@@ -77,29 +70,14 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('vscode-fast-index.showMenu', async () => {
             const items: (vscode.QuickPickItem & { id: string })[] = [
                 { id: 'pinned', label: '$(pin) Show or hide pinned searches' },
-                { id: 'preview', label: '$(preview) Open the preview panel' },
+                { id: 'results', label: '$(book) Open the results editor' },
                 { id: 'log', label: '$(output) Show the search log' }
             ];
             const picked = await vscode.window.showQuickPick(items, { title: 'Fast Index', placeHolder: 'Choose an action' });
             if (!picked) return;
             if (picked.id === 'pinned') sidebarProvider.togglePinnedSearches();
-            if (picked.id === 'preview') void vscode.commands.executeCommand('vscode-fast-index.openPreview');
+            if (picked.id === 'results') void vscode.commands.executeCommand('vscode-fast-index.openResultsInEditor');
             if (picked.id === 'log') searchLog.show(true);
-        }),
-        vscode.commands.registerCommand('vscode-fast-index.openPreview', async () => {
-            // Focus the view, else reveal its container, else tell the user where it is.
-            const attempts = ['fast-index-preview.focus', 'workbench.view.extension.fast-index-preview-container'];
-            for (const command of attempts) {
-                try {
-                    await vscode.commands.executeCommand(command);
-                    return;
-                } catch {
-                    /* try the next one */
-                }
-            }
-            vscode.window.showInformationMessage(
-                'Fast Index: open the Panel (Ctrl+J) and pick "Fast Index Preview" from the panel view menu.'
-            );
         })
     );
     context.subscriptions.push(

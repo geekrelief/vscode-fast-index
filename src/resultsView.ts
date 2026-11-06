@@ -26,6 +26,8 @@ export class ResultsView implements vscode.Disposable {
     private rebuildQueued = false;
     private opening = false;
     private syncQueued = false;
+    /** `${file}:${line}` -> document line of the matching hit, filled by render(). */
+    private matchLines = new Map<string, number>();
     private lastPeek?: { line: number; version: number; at: number };
 
     public constructor(
@@ -100,6 +102,27 @@ export class ResultsView implements vscode.Disposable {
         }
     }
 
+    /**
+     * Scrolls the results tab to a specific hit. Called when the pointer rests on
+     * a result in the sidebar; a closed or hidden tab is left alone, and nothing
+     * is focused, so the panel keeps the keyboard.
+     */
+    public reveal(file: string, line: number): void {
+        const target = this.matchLines.get(file + ':' + line);
+        if (target === undefined) return;
+
+        const editor = vscode.window.visibleTextEditors.find(
+            candidate => candidate.document.uri.toString() === ResultsDocumentProvider.uri.toString()
+        );
+        if (!editor) return;
+        if (target < 0 || target >= editor.document.lineCount) return;
+
+        const range = editor.document.lineAt(target).range;
+        editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+        const position = new vscode.Position(target, 0);
+        editor.selection = new vscode.Selection(position, position);
+    }
+
     /** Called whenever the panel produces new results or changes its layout. */
     public async refresh(): Promise<void> {
         if (!this.isOpen()) return;
@@ -135,7 +158,7 @@ export class ResultsView implements vscode.Disposable {
     }
 
     private async render(snapshot: ResultsSnapshot): Promise<string> {
-        const configured = vscode.workspace.getConfiguration('fastIndex').get<number>('previewContextLines');
+        const configured = vscode.workspace.getConfiguration('fastIndex').get<number>('resultContextLines');
         const radius = Math.max(0, Math.min(50, Math.round(typeof configured === 'number' ? configured : 2)));
 
         const rows = this.groupRows(snapshot.rows as ResultRow[]);
@@ -156,7 +179,9 @@ export class ResultsView implements vscode.Disposable {
             return lines;
         };
 
-        return buildResultsText(snapshot, rows, radius, readSource);
+        const built = await buildResultsText(snapshot, rows, radius, readSource);
+        this.matchLines = built.matchLines;
+        return built.text;
     }
 
     /** One contiguous block per file; tree mode also sorts the blocks like the sidebar. */

@@ -10,9 +10,9 @@ Instead of searching text "on the fly" for every query, the plugin builds an inv
 * **No surprise prefills:** opening the panel never restores the previous query and never seeds the box from the editor cursor — it starts empty. It is only seeded when you open it with an explicit **selection** in the editor; while the panel is open, moving the cursor onto a word (or selecting text) keeps the box in sync. Opening or switching files does not count as a cursor move. Toggle the whole behaviour with `fastIndex.followEditor` (or the checkbox in the panel settings), or freeze it temporarily with the 🔒 title-bar lock.
 * **Replace keeps the index current:** applying a replacement re-indexes the affected buffers immediately, and searching reads open (dirty) documents, so replaced text disappears from results and new text is findable without saving first.
 * **Results in the editor:** the book icon in the title bar (**Fast Index: Open Results in Editor**) opens the current results as a real editor tab, written in VS Code's own search-editor format so the built-in `search-result` language gives it theme-driven syntax highlighting, Follow-link targets and peek-on-click. It is driven by the panel and refreshed in place. Set `fastIndex.autoOpenResults` to have it open itself after a search.
-* **Preview panel:** a read-only preview docked in the bottom panel next to the terminal — run **Fast Index: Open Preview Panel** or pick *Fast Index Preview* from the panel's view menu. It follows whichever result the sidebar is resting on, highlights the **search term itself** inside the matched line, and clicking any line opens that file at that line. It is styled from the editor's own theme: `editor.background`/`foreground`, font family, size, weight and `editor.lineHeight`, line-number gutter colours, current-line highlight, selection and scrollbar colours, plus the theme's `tokenColors` for syntax.
+* **Hover follows into the results editor:** resting the pointer on a result for `fastIndex.hoverJumpDelay` (default 1500 ms) scrolls the results tab to that exact hit and puts the caret on it — without taking focus, so the search box keeps the keyboard. Only the row the pointer is still resting on counts; sweeping across results never yanks the tab around. If the tab is closed or hidden nothing happens.
 * **Balanced results:** at most `fastIndex.maxResultsPerFile` matching lines per file (default 3, 0 = unlimited) and a fair share of the result list per workspace folder, so one huge engine file can no longer hide your own project's hits.
-* **Title-bar buttons:** the 🔒/🔓 lock, ⚙️ settings and ☰ menu sit in the view's title bar next to the name, like the built-in Search view. The 🔒 **lock** freezes the search — clicking or moving the cursor in the editor no longer refills the query, so results stay put while you read code; the state survives reloads. The ☰ menu offers pinned-search show/hide, the preview panel and the search log.
+* **Title-bar buttons:** the 🔒/🔓 lock, ⚙️ settings and ☰ menu sit in the view's title bar next to the name, like the built-in Search view. The 🔒 **lock** freezes the search — clicking or moving the cursor in the editor no longer refills the query, so results stay put while you read code; the state survives reloads. The ☰ menu offers pinned-search show/hide, the results editor and the search log.
 * **Pinned searches:** the 📌 button saves the current search — term, `Aa`/`.*`, `Only in`, `Skip`, the results filter and your collapsed tree branches. Pins live in a scrollable, resizable box anchored at the bottom of the panel (drag its top edge to resize, or hide it from the ☰ menu); each shows the main term with its extra parameters (scope, filter, `Aa`/`.*`) in muted text beneath, so pins with the same term stay distinguishable. Click one to restore the whole state, or use its ✕ to remove it. Kept per workspace and across sessions by `fastIndex.persistPinnedSearches` (default on; turn it off — or untick it in the panel settings — to keep pins for the session only).
 * **Search log:** the ☰ menu's *Show the search log* opens a **Fast Index** output panel that records every search with its trigger (typing, pin, filter, scope, prefill…), its scope/filter and the result counts, plus prefills that were ignored and why, and searches superseded by a newer one. Use it when results change unexpectedly.
 * **Latest search wins:** starting a search cancels the one in flight; stale results are discarded instead of overwriting the newer list.
@@ -45,8 +45,8 @@ You can customize the extension directly via the **⚙️** title-bar button:
 * **Exclude Patterns:** Glob patterns for files/folders to ignore (e.g., `{**/node_modules/**,**/.git/**}`).
 * **Max File Size (KB):** Prevent the indexer from choking on huge minified or binary files (default is `512` KB).
 * **Max Search Results:** Limit the number of snippets shown to keep the UI responsive (default is `50`).
-* **Preview Hover Delay:** Milliseconds to rest the pointer on a result before the Preview Panel updates (default `1500`, 0 = instant).
-* **Preview Context Lines:** Lines shown above and below a match (default `2`).
+* **Hover Jump Delay:** Milliseconds to rest the pointer on a result before the results editor jumps to that line (default `1500`, 0 = instant).
+* **Results Context Lines:** Lines shown above and below each match in the results editor (default `2`).
 * **Keep pinned searches between sessions:** on/off (default on).
 * **Open the results editor automatically:** on/off (default off, also `fastIndex.autoOpenResults`). When on, a search that finds matches reopens the results tab if you closed it — without stealing focus, so you can keep typing in the panel.
 * **Follow editor selection / word under cursor:** on/off.
@@ -72,11 +72,11 @@ Each file's size and mtime are stored with the index, so a reindex **skips uncha
 
 The index is built from trigrams: every word of three or more characters contributes its overlapping trigrams, mapped to file ids. A search intersects the posting lists of the query's trigrams (in memory, as `Uint32` arrays) and decodes only those lists. Results are ranked so file-name matches come first. When searching with regular expressions or special-character-only queries, the plugin falls back to scanning the indexed files concurrently.
 
-The preview surfaces share `src/theme.ts`, which resolves `workbench.colorTheme` to its theme file on disk, follows `include` chains and JSONC syntax, and maps the relevant TextMate scopes onto the preview's token categories.
+The results tab is a real editor, so its highlighting is the editor's own: no theme parsing or token mapping lives in this extension any more.
 
 ## Changelog — current development session
 
-Everything below landed in one session (0.3.6 → 0.9.2).
+Everything below landed in one session (0.3.6 → 0.10.0).
 
 ### Search UI
 
@@ -93,14 +93,11 @@ Everything below landed in one session (0.3.6 → 0.9.2).
 * Persistence across sessions via `fastIndex.persistPinnedSearches` (workspace storage), toggleable in the panel settings.
 * Pinning reveals the panel; the ☰ menu can show/hide the pinned box.
 
-### Preview
+### Hover → results editor
 
-* Added a docked **preview panel** (new view container in the bottom panel, next to the terminal).
-* Preview follows the hovered result without swapping while the pointer travels to the pane; only a row the pointer still rests on is previewed (`fastIndex.previewHoverDelay`, default 1500 ms).
-* `fastIndex.previewContextLines` (default 2) controls how many lines are shown above and below a match.
-* The **search term itself** is highlighted inside the matched line; when a theme's find-highlight colour is nearly invisible against its background (e.g. Synthwave), the highlight is blended from the cursor colour plus an accent underline.
-* Syntax highlighting for C/C++/C#/Python, driven by the **active theme's own `tokenColors`** (theme file resolution, `include` chains, JSONC parsing, scope mapping, transparent-colour guard) with built-in dark/light fallbacks.
-* The panel preview is styled from the editor's theme variables — background, font family/size/weight, `editor.lineHeight`, line-number gutter, current-line highlight, selection, scrollbars — and clicking any line opens that file at that line.
+* The bottom-panel **preview was removed**: a webview cannot render a real editor, so it could never match the editor's look (no semantic tokens, indent guides, folding, ligatures or the same fonts). Rather than approximate it, hovering now drives the real editor.
+* Resting on a result for `fastIndex.hoverJumpDelay` (default 1500 ms) scrolls the results tab to that hit and puts the caret there, without stealing focus. Only a row the pointer still rests on counts, so sweeping never yanks the tab.
+* `fastIndex.resultContextLines` (default 2) controls how many lines are shown above and below each match in the results tab.
 
 ### Results in the editor
 
@@ -125,11 +122,10 @@ Everything below landed in one session (0.3.6 → 0.9.2).
 * **Latest search wins:** searches carry a generation number; a newer search cancels the running one between file batches and stale results are never posted.
 * **Fast Index output channel** (`☰ → Show the search log`) recording every search with its trigger, scope, filter and result counts, plus prefill decisions and superseded searches.
 * Title-bar buttons contributed through `menus."view/title"` (lock/unlock, settings, ☰ menu, results-in-editor) with a `fastIndex.locked` context key.
-* The results preview panel is registered as `fast-index-preview-container` / `fast-index-preview` — view container ids must match `^[a-z0-9_-]+$`, which is why the original `fastIndex.previewPanel` id was silently rejected and the view fell back into the Explorer.
 * Fixed a crash when opening the panel with the cursor at column 0 (`position.translate(0, -1)` threw "character must be non-negative").
 * Fixed duplicate `viewsContainers` / `views` keys in `package.json`, which caused the panel view to be dropped from the manifest.
 
 ### Internal
 
-* Split out `src/theme.ts` (theme token-colour resolution), `src/PreviewProvider.ts` (bottom-panel preview), `src/ResultsDocumentProvider.ts` (search-editor-format serialisation, depth-first ordering), `src/resultsView.ts` (results tab lifecycle, click-to-peek, panel-driven refresh) and `src/log.ts` (output channel).
+* Split out `src/ResultsDocumentProvider.ts` (search-editor-format serialisation, hover line map, depth-first ordering), `src/resultsView.ts` (results tab lifecycle, click-to-peek, hover reveal, panel-driven refresh) and `src/log.ts` (output channel).
 * Pinned searches, lock state and layout stored through the webview/host state as appropriate.

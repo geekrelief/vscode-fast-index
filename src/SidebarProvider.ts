@@ -50,8 +50,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 maxFileSizeKB: config.get<number>('maxFileSizeKB') || 512,
                 maxResults: config.get<number>('maxResults') || 50,
                 maxRecentSearches: config.get<number>('maxRecentSearches') ?? 20,
-                previewHoverDelay: config.get<number>('previewHoverDelay') ?? 1500,
-                previewContextLines: config.get<number>('previewContextLines') ?? 2,
+                hoverJumpDelay: config.get<number>('hoverJumpDelay') ?? 1500,
+                resultContextLines: config.get<number>('resultContextLines') ?? 2,
                 followEditor: config.get<boolean>('followEditor') ?? true,
                 persistPinnedSearches: config.get<boolean>('persistPinnedSearches') !== false,
                 autoOpenResults: config.get<boolean>('autoOpenResults') === true
@@ -84,8 +84,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         void this._view?.webview.postMessage({ type: 'togglePinned' });
     }
 
-    /** Set by the extension so the bottom panel can mirror the preview. */
-    public onPreview?: (file: string, line: number, query: string, isRegex: boolean, isMatchCase: boolean) => void;
+    /** Set by the extension so resting on a result can scroll the results tab. */
+    public onHover?: (file: string, line: number) => void;
 
     /** Set by the extension so the results tab can re-render with the panel. */
     public onResults?: (snapshot: { query: string; isRegex: boolean; isMatchCase: boolean; filter: string; include: string[]; exclude: string[]; rows: any[] }, reason: 'search' | 'layout') => void;
@@ -201,13 +201,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     this._view?.webview.postMessage({ type: 'focus' });
                     break;
                 }
-                case 'getContext': {
-                    // A hovered result drives the bottom Preview Panel; it no longer
-                    // renders anything inside this webview.
-                    const file = String(data.file || '');
-                    const line = Number(data.line) || 0;
-                    const snapshot = this.lastSnapshot;
-                    this.onPreview?.(file, line, snapshot ? snapshot.query : '', !!snapshot?.isRegex, !!snapshot?.isMatchCase);
+                case 'hover': {
+                    // The pointer rested on a result: scroll the results tab to it.
+                    this.onHover?.(String(data.file || ''), Number(data.line) || 0);
                     break;
                 }
                 case 'prefillIgnored': {
@@ -334,8 +330,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         maxFileSizeKB: config.get<number>('maxFileSizeKB') ?? 512,
                         maxResults: config.get<number>('maxResults') ?? 50,
                         maxRecentSearches: config.get<number>('maxRecentSearches') ?? 20,
-                        previewHoverDelay: config.get<number>('previewHoverDelay') ?? 1500,
-                        previewContextLines: config.get<number>('previewContextLines') ?? 2,
+                        hoverJumpDelay: config.get<number>('hoverJumpDelay') ?? 1500,
+                        resultContextLines: config.get<number>('resultContextLines') ?? 2,
                         followEditor: config.get<boolean>('followEditor') ?? true,
                         persistPinnedSearches: config.get<boolean>('persistPinnedSearches') !== false,
                         autoOpenResults: config.get<boolean>('autoOpenResults') === true
@@ -354,8 +350,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         maxFileSizeKB: clampNumber(input.maxFileSizeKB, current.maxFileSizeKB, 1, 102400),
                         maxResults: clampNumber(input.maxResults, current.maxResults, 1, 100000),
                         maxRecentSearches: clampNumber(input.maxRecentSearches, current.maxRecentSearches, 0, 100),
-                        previewHoverDelay: clampNumber(input.previewHoverDelay, current.previewHoverDelay, 0, 10000),
-                        previewContextLines: clampNumber(input.previewContextLines, current.previewContextLines, 0, 50),
+                        hoverJumpDelay: clampNumber(input.hoverJumpDelay, current.hoverJumpDelay, 0, 10000),
+                        resultContextLines: clampNumber(input.resultContextLines, current.resultContextLines, 0, 50),
                         followEditor: typeof input.followEditor === 'boolean' ? input.followEditor : current.followEditor,
                         persistPinnedSearches: typeof input.persistPinnedSearches === 'boolean' ? input.persistPinnedSearches : current.persistPinnedSearches,
                         autoOpenResults: typeof input.autoOpenResults === 'boolean' ? input.autoOpenResults : current.autoOpenResults
@@ -902,11 +898,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         <label><input type="checkbox" id="confAutoOpenResults" /> Open the results editor automatically when a search finds matches</label>
                     </div>
                     <div class="setting-item">
-                        <label>Preview Hover Delay (ms, 0 = instant)</label>
-                        <input type="number" id="confPreviewDelay" min="0" step="50" />
+                        <label>Hover Jump Delay (ms, 0 = instant)</label>
+                        <input type="number" id="confHoverDelay" min="0" step="50" />
                     </div>
                     <div class="setting-item">
-                        <label>Preview Context Lines (above and below)</label>
+                        <label>Results Context Lines (above and below)</label>
                         <input type="number" id="confContextLines" min="0" max="50" step="1" />
                     </div>
                     <div class="cache-section">
@@ -983,7 +979,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const confMaxRecent = document.getElementById('confMaxRecent');
                     const confFollowEditor = document.getElementById('confFollowEditor');
                     const confPersistPinned = document.getElementById('confPersistPinned');
-                    const confPreviewDelay = document.getElementById('confPreviewDelay');
+                    const confHoverDelay = document.getElementById('confHoverDelay');
                     const confAutoOpenResults = document.getElementById('confAutoOpenResults');
                     const confContextLines = document.getElementById('confContextLines');
                     const scopeInclude = document.getElementById('scopeInclude');
@@ -1013,7 +1009,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     let userOwnsQuery = false;
                     let applyingPrefill = false;
                     let pinnedSearches = [];
-                    let previewDelay = 1500;
+                    let hoverDelay = 1500;
                     let locked = false;
                     let pinnedVisible = true;
                     let pinnedHeight = 170;
@@ -1197,8 +1193,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                                 maxRecentSearches: parseInt(confMaxRecent.value, 10),
                                 followEditor: confFollowEditor.checked,
                                 persistPinnedSearches: confPersistPinned.checked,
-                                previewHoverDelay: confPreviewDelay.value,
-                                previewContextLines: confContextLines.value,
+                                hoverJumpDelay: confHoverDelay.value,
+                                resultContextLines: confContextLines.value,
                                 autoOpenResults: confAutoOpenResults?.checked === true
                             }
                         });
@@ -1444,8 +1440,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             rememberSearch(currentQueryText());
                             vscode.postMessage({ type: 'openFile', value: { file: item.file, line: item.line } });
                         };
-                        div.addEventListener('mouseenter', () => schedulePreview(item, div));
-                        div.addEventListener('mouseleave', () => { if (previewHover === div) previewHover = null; });
+                        div.addEventListener('mouseenter', () => scheduleHover(item, div));
+                        div.addEventListener('mouseleave', () => { if (hoverRow === div) hoverRow = null; });
                         return div;
                     }
 
@@ -1753,18 +1749,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         return parts.join(' · ');
                     }
 
-                    let previewTimer = null;
-                    let previewHover = null;
+                    let hoverTimer = null;
+                    let hoverRow = null;
 
-                    function schedulePreview(item, element) {
-                        clearTimeout(previewTimer);
-                        previewHover = element;
-                        previewTimer = setTimeout(function () {
-                            // Only preview a row the pointer is still resting on: sweeping
-                            // across results must not swap the bottom-panel preview.
-                            if (previewHover !== element) return;
-                            vscode.postMessage({ type: 'getContext', file: item.file, line: item.line });
-                        }, previewDelay);
+                    function scheduleHover(item, element) {
+                        clearTimeout(hoverTimer);
+                        hoverRow = element;
+                        hoverTimer = setTimeout(function () {
+                            // Only act on a row the pointer is still resting on: sweeping
+                            // across results must not yank the results tab around.
+                            if (hoverRow !== element) return;
+                            vscode.postMessage({ type: 'hover', file: item.file, line: item.line });
+                        }, hoverDelay);
                     }
 
                     function describePin(pin) {
@@ -1885,10 +1881,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             confMaxResults.value = message.value.maxResults;
                             confFollowEditor.checked = message.value.followEditor !== false;
                             confPersistPinned.checked = message.value.persistPinnedSearches !== false;
-                            confPreviewDelay.value = message.value.previewHoverDelay ?? 1500;
-                            confContextLines.value = message.value.previewContextLines ?? 2;
+                            confHoverDelay.value = message.value.hoverJumpDelay ?? 1500;
+                            confContextLines.value = message.value.resultContextLines ?? 2;
                             if (confAutoOpenResults) confAutoOpenResults.checked = message.value.autoOpenResults === true;
-                            previewDelay = Number.isFinite(Number(message.value.previewHoverDelay)) ? Math.max(0, Number(message.value.previewHoverDelay)) : 1500;
+                            hoverDelay = Number.isFinite(Number(message.value.hoverJumpDelay)) ? Math.max(0, Number(message.value.hoverJumpDelay)) : 1500;
                             if (typeof message.value.maxRecentSearches === 'number') {
                                 confMaxRecent.value = message.value.maxRecentSearches;
                                 maxRecent = Math.max(0, Math.min(100, Math.floor(message.value.maxRecentSearches)));

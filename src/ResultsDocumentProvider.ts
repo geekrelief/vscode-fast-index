@@ -87,7 +87,7 @@ export async function buildResultsText(
     rows: ResultRow[],
     radius: number,
     readSource: (file: string) => Promise<string[]>
-): Promise<string> {
+): Promise<{ text: string; matchLines: Map<string, number> }> {
     const files = new Set(rows.map(row => row.fileName));
     const flags = [
         snapshot.isMatchCase ? 'CaseSensitive' : '',
@@ -108,6 +108,8 @@ export async function buildResultsText(
         : rows.length + ' result' + (rows.length === 1 ? '' : 's') + ' - ' + files.size + ' file' + (files.size === 1 ? '' : 's');
 
     const body: string[] = [];
+    /** `${file}:${line}` (0-based) -> document line index of that hit. */
+    const matchLines = new Map<string, number>();
     let currentFile = '';
 
     for (const row of rows) {
@@ -120,6 +122,7 @@ export async function buildResultsText(
         const source = await readSource(row.file);
         if (source.length === 0) {
             // The file went away between the search and the render: keep the hit itself.
+            matchLines.set(row.file + ':' + row.line, body.length);
             body.push('  ' + pad(row.line + 1, 4) + ': ' + String(row.text ?? ''));
             continue;
         }
@@ -128,12 +131,18 @@ export async function buildResultsText(
         const end = Math.min(source.length, row.line + radius + 1);
         const width = Math.max(1, String(end).length);
         for (let index = start; index < end; index++) {
-            const separator = index === row.line ? ': ' : '  ';
+            const isMatch = index === row.line;
+            const separator = isMatch ? ': ' : '  ';
+            if (isMatch) matchLines.set(row.file + ':' + index, body.length);
             body.push('  ' + pad(index + 1, width) + separator + source[index]);
         }
     }
 
-    return [header.join('\n'), summary, '', body.join('\n')].join('\n');
+    // The body starts after the header lines, the summary and one blank line.
+    const offset = header.length + 2;
+    for (const [key, index] of matchLines) matchLines.set(key, index + offset);
+
+    return { text: [header.join('\n'), summary, '', body.join('\n')].join('\n'), matchLines };
 }
 
 interface TreeNode {
