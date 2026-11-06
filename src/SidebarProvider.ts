@@ -21,6 +21,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
     private prefillTimer?: ReturnType<typeof setTimeout>;
     private suppressPrefillUntil = 0;
+    /** Where the user last put the caret, so opening the panel can tell that from an open at 0,0. */
+    private lastUserCursor?: { uri: string; line: number; character: number };
     private _statusText = 'Starting…';
     private _statusState: 'busy' | 'ready' | 'idle' = 'busy';
 
@@ -141,6 +143,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 // Opening a file parks the cursor at 0,0 and fires a "Command" selection
                 // change; only real pointer/keyboard moves may seed the search box.
                 if (event.kind === vscode.TextEditorSelectionChangeKind.Command) return;
+                const active = event.selections[0]?.active;
+                if (active) {
+                    this.lastUserCursor = {
+                        uri: event.textEditor.document.uri.toString(),
+                        line: active.line,
+                        character: active.character
+                    };
+                }
                 schedulePrefill();
             }),
             vscode.window.onDidChangeActiveTextEditor(editor => {
@@ -447,11 +457,27 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
      */
     private prefillOnOpen(): void {
         const editor = vscode.window.activeTextEditor;
-        if (!editor || editor.selection.isEmpty) {
-            log('open: no selection in the editor, not prefilling');
+        if (!editor) {
+            log('open: no editor, not prefilling');
             return;
         }
-        this.prefillFromEditor('open-selection');
+        // A selection is always deliberate; a bare caret only counts when the user put it
+        // there (rather than a file opening and parking it at 0,0).
+        if (editor.selection.isEmpty && !this.isDeliberateCursor(editor)) {
+            log('open: cursor was not placed by the user, not prefilling');
+            return;
+        }
+        this.prefillFromEditor(editor.selection.isEmpty ? 'open-cursor' : 'open-selection');
+    }
+
+    /** True when the caret sits exactly where the user last put it, not where an open put it. */
+    private isDeliberateCursor(editor: vscode.TextEditor): boolean {
+        const mark = this.lastUserCursor;
+        if (!mark) return false;
+        const active = editor.selection.active;
+        return mark.uri === editor.document.uri.toString()
+            && mark.line === active.line
+            && mark.character === active.character;
     }
 
     private prefillFromEditor(source: string = 'cursor'): void {
@@ -1936,8 +1962,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             if (locked) return;
                             const prefill = String(message.value || '');
                             // Never overwrite a query the user is editing right now.
-                            // Once the user has typed, the box belongs to them until they leave the panel.
-                            const typing = userOwnsQuery;
+                            // Ownership lasts only while the panel itself has focus: once the
+                            // caret is in the editor, the editor drives the search again.
+                            const focused = typeof document.hasFocus === 'function' ? document.hasFocus() : true;
+                            const typing = userOwnsQuery && focused;
                             if (prefill && prefill !== searchInput.value && !typing) {
                                 applyingPrefill = true;
                                 searchInput.value = prefill;

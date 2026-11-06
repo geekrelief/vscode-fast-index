@@ -7,7 +7,7 @@ Instead of searching text "on the fly" for every query, the plugin builds an inv
 ## Key Features
 
 * **Instant Search:** Results appear as you type (from 3 characters) with zero lag. The search box takes focus when the panel opens and doubles as an editable combo box: recent searches drop down from the ▾ button on the right, `↑`/`↓` walk them, `Enter` runs the highlighted one. The list size is `fastIndex.maxRecentSearches` (default 20, 0 disables it).
-* **No surprise prefills:** opening the panel never restores the previous query and never seeds the box from the editor cursor — it starts empty. It is only seeded when you open it with an explicit **selection** in the editor; while the panel is open, moving the cursor onto a word (or selecting text) keeps the box in sync. Opening or switching files does not count as a cursor move. Toggle the whole behaviour with `fastIndex.followEditor` (or the checkbox in the panel settings), or freeze it temporarily with the 🔒 title-bar lock.
+* **No surprise prefills:** opening the panel never restores the previous query. It seeds the box from an explicit **selection**, or from a caret **you** placed (clicking a word, or typing) — never from the caret a file open leaves at 0,0. While the panel is open, clicking onto a word (or selecting text) keeps the box in sync, and the box stops being "yours" as soon as focus returns to the editor. Toggle the whole behaviour with `fastIndex.followEditor` (or the checkbox in the panel settings), or freeze it temporarily with the 🔒 title-bar lock.
 * **Replace keeps the index current:** applying a replacement re-indexes the affected buffers immediately, and searching reads open (dirty) documents, so replaced text disappears from results and new text is findable without saving first.
 * **Results in the editor:** the book icon in the title bar (**Fast Index: Open Results in Editor**) opens the current results as a real editor tab, written in VS Code's own search-editor format so the built-in `search-result` language gives it theme-driven syntax highlighting, Follow-link targets and peek-on-click. It is driven by the panel and refreshed in place. Set `fastIndex.autoOpenResults` to have it open itself after a search.
 * **Hover follows into the results editor:** resting the pointer on a result for `fastIndex.hoverJumpDelay` (default 1500 ms) scrolls the results tab to that exact hit and puts the caret on it — without taking focus, so the search box keeps the keyboard. Only the row the pointer is still resting on counts; sweeping across results never yanks the tab around. If the tab is closed or hidden nothing happens.
@@ -76,7 +76,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog — current development session
 
-Everything below landed in one session (0.3.6 → 0.10.1).
+Everything below landed in one session (0.3.6 → 0.10.2).
 
 ### Search UI
 
@@ -111,7 +111,8 @@ Everything below landed in one session (0.3.6 → 0.10.1).
 
 ### Follow-editor / prefill
 
-* Opening the panel no longer restores or re-runs the previous query, and only an explicit **selection** seeds the box on open.
+* Opening the panel seeds the box from an explicit **selection** or from a caret the user placed (clicked or typed); a caret left by opening a file does not count.
+* The box only counts as user-owned while the panel has focus — moving focus back to the editor lets the caret drive the search again, even if no `blur` event arrives.
 * While the panel is open, a cursor **on a word** (no ±1 probing) or a selection prefills the box; a cursor in whitespace does not.
 * Opening or switching files no longer prefills (`TextEditorSelectionChangeKind.Command` is ignored; active-editor changes need a selection).
 * Ignored prefills are logged with the reason (`locked`, `box-owned`) and prefills are tagged with their source.
