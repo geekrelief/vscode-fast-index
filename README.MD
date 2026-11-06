@@ -12,7 +12,7 @@ Instead of searching text "on the fly" for every query, the plugin builds an inv
 * **Results in the editor:** the book icon in the title bar (**Fast Index: Open Results in Editor**) opens the current results as a real editor tab, written in VS Code's own search-editor format so the built-in `search-result` language gives it theme-driven syntax highlighting, Follow-link targets and peek-on-click. It is driven by the panel and refreshed in place. Set `fastIndex.autoOpenResults` to have it open itself after a search.
 * **Results follow into the results editor:** resting the pointer on a match, or selecting it, scrolls the results tab to that exact hit and **selects that line**, so the indicator is a normal text selection that stays until you pick another match. The match's **file row and every ancestor directory are highlighted** in the tree at the same time — the same emphasis the Explorer gives the active file — and the highlight follows the pointer to another file. It never takes focus and never refills the search box (selections made in the results editor are ignored by Auto Search unless you turn on `fastIndex.autoSearchFromResults`). If the tab is closed or hidden nothing happens.
 * **Balanced results:** at most `fastIndex.maxResultsPerFile` matching lines per file (default 3, 0 = unlimited) and a fair share of the result list per workspace folder, so one huge engine file can no longer hide your own project's hits.
-* **Title-bar buttons:** the 🔒/🔓 lock, ⚙️ settings and ☰ menu sit in the view's title bar next to the name, like the built-in Search view. The 🔒 **lock** freezes the search — clicking or moving the cursor in the editor no longer refills the query, so results stay put while you read code; the state survives reloads (a **🔒 Locked** badge in the results toolbar shows when a lock is in force). The ☰ menu offers pinned-search show/hide, the results editor and the search log.
+* **Title-bar buttons:** the 🔒/🔓 lock, ⚙️ settings and ☰ menu sit in the view's title bar next to the name, like the built-in Search view. The ⚙️ button now brings the **Settings** section into view (its own section at the bottom of the Fast Index container, under Pinned Searches). The 🔒 **lock** freezes the search — clicking or moving the cursor in the editor no longer refills the query, so results stay put while you read code; the state survives reloads (a **🔒 Locked** badge in the results toolbar shows when a lock is in force). The ☰ menu offers pinned-search show/hide, the results editor and the search log.
 * **⚡ editor title button:** every editor shows the same zap icon as the view container; clicking it brings the Fast Index panel forward. That is what gets you back to the panel after the container has been moved to the **Secondary Side Bar**, where the Activity Bar icon is gone.
 * **Pinned searches:** the 📌 button saves the current search — term, `Aa`/`.*`, `Only in`, `Skip`, the results filter and your collapsed tree branches. Pins live in their own collapsible **Pinned Searches** section in the Fast Index container, so they can never overlap the results; each row shows the term with its parameters (`only: h · Aa`) in the description. Click one to restore the whole state, or right-click for **Remove Pinned Search**. Kept per workspace and across sessions by `fastIndex.persistPinnedSearches` (default on; turn it off — or untick it in the panel settings — to keep pins for the session only).
 * **Search log:** the ☰ menu's *Show the search log* opens a **Fast Index** output panel that records every search with its trigger (typing, pin, filter, scope, prefill…), its scope/filter and the result counts, plus prefills that were ignored and why, and searches superseded by a newer one. Use it when results change unexpectedly.
@@ -83,7 +83,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog
 
-### 0.8.0 → 0.19.0 — native results tree, hover jump, pinned section, results editor and settings fixes
+### 0.8.0 → 0.20.0 — native results tree, hover jump, pinned section, settings section, results editor and settings fixes
 
 #### Results tab in the editor
 
@@ -110,6 +110,12 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 * The caret mark and the editor listeners now live for the **whole extension lifetime** instead of inside `resolveWebviewView`: a click made before the panel has ever been opened in that window is remembered, so the first open seeds the box (previously it took a second click).
 * The box counts as user-owned only while the panel has focus, so returning to the editor lets the caret drive the search again even when no `blur` event arrives.
 * A **persisted 🔒 lock** used to disable prefill silently — no message, no log line. The results toolbar now shows a **🔒 Locked** badge, and the output channel logs the reason once per lock.
+
+#### Settings section (0.20.0)
+
+* Settings is now **its own section** at the bottom of the Fast Index container, under Pinned Searches, instead of a panel toggled inside the search view. It is a webview view that renders the same form (one shared markup and stylesheet), so every field, the Reindex button, the stale banner and the cached-indexes list behave exactly as before; the section is collapsible like any other, and the ⚙️ title-bar button focuses it.
+* The search panel no longer renders the form at all — its copy is hidden, so opening the container shows Search, Results, Pinned Searches, Settings.
+* Messages from both webviews go through one handler and replies are broadcast to both, so saving a setting updates the section and the panel alike.
 
 #### Settings
 

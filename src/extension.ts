@@ -191,6 +191,11 @@ export async function activate(context: vscode.ExtensionContext) {
             webviewOptions: {
                 retainContextWhenHidden: true
             }
+        }),
+        vscode.window.registerWebviewViewProvider('fast-index.settings', sidebarProvider, {
+            webviewOptions: {
+                retainContextWhenHidden: true
+            }
         })
     );
 

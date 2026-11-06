@@ -35,7 +35,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     public setStatus(text: string, state: 'busy' | 'ready' | 'idle' = 'busy'): void {
         this._statusText = text;
         this._statusState = state;
-        this._view?.webview.postMessage({ type: 'status', value: { text, state } });
+        this.postToViews({ type: 'status', value: { text, state } });
     }
 
     private static escapeHtml(value: string): string {
@@ -45,12 +45,22 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private pinned: PinnedSearch[] = [];
     /** Replace mode is toggled from the view title bar. */
     private replaceMode = false;
+    /** The settings section's webview, when it is open. */
+    private _settingsView?: vscode.WebviewView;
+    /** The panel's message handler, reused by the settings section. */
+    private webviewMessageHandler?: (data: any) => Promise<void>;
+
+    /** Posts to whichever views are open; each script ignores messages it does not know. */
+    private postToViews(message: unknown): void {
+        void this._view?.webview.postMessage(message);
+        void this._settingsView?.webview.postMessage(message);
+    }
 
 
     /** Flips replace mode (title-bar button) and tells the webview. */
     public toggleReplace(): void {
         this.replaceMode = !this.replaceMode;
-        this._view?.webview.postMessage({ type: 'replaceMode', value: this.replaceMode });
+        this.postToViews({ type: 'replaceMode', value: this.replaceMode });
     }
     private locked = false;
     private readonly disposables: vscode.Disposable[] = [];
@@ -68,7 +78,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     public sendConfig(): void {
         const config = vscode.workspace.getConfiguration('fastIndex');
-        void this._view?.webview.postMessage({
+        void this.postToViews({
             type: 'configData',
             value: {
                 includeExtensions: config.get<string>('includeExtensions') || '',
@@ -182,17 +192,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.lockNoticed = false;
         void this.memento?.update('fastIndex.locked', this.locked);
         void vscode.commands.executeCommand('setContext', 'fastIndex.locked', this.locked);
-        void this._view?.webview.postMessage({ type: 'locked', value: this.locked });
+        void this.postToViews({ type: 'locked', value: this.locked });
     }
 
     public showSettings(): void {
-        try { this._view?.show?.(true); } catch { /* older hosts */ }
-        void this._view?.webview.postMessage({ type: 'showSettings' });
+        // Settings is its own section now: bring it into view.
+        void vscode.commands.executeCommand('fast-index.settings.focus');
     }
 
     public togglePinnedSearches(): void {
         try { this._view?.show?.(true); } catch { /* older hosts */ }
-        void this._view?.webview.postMessage({ type: 'togglePinned' });
+        void this.postToViews({ type: 'togglePinned' });
     }
 
     /** Set by the extension so resting on a result can scroll the results tab. */
@@ -285,7 +295,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     /** Restores a pin from the Pinned Searches view: the webview owns the state it sets. */
     public applyPin(pin: PinnedSearch): void {
         try { this._view?.show?.(true); } catch { /* host without show() */ }
-        this._view?.webview.postMessage({ type: 'applyPin', value: pin });
+        this.postToViews({ type: 'applyPin', value: pin });
     }
 
     /** Removes a pin from the Pinned Searches view. */
@@ -294,10 +304,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.pinned = this.pinned.filter(entry => entry.id !== id);
         if (this.pinned.length === before) return;
         await this.persistPinned();
-        this._view?.webview.postMessage({ type: 'pinnedList', value: this.pinned });
+        this.postToViews({ type: 'pinnedList', value: this.pinned });
     }
 
     public resolveWebviewView(webviewView: vscode.WebviewView) {
+        // The settings section renders the same form in its own document.
+        if (webviewView.viewType === 'fast-index.settings') {
+            this._settingsView = webviewView;
+            webviewView.webview.options = { enableScripts: true, localResourceRoots: [this._extensionUri] };
+            webviewView.webview.html = this._getSettingsHtml();
+            webviewView.webview.onDidReceiveMessage(async (data) => {
+                await this.webviewMessageHandler?.(data);
+            });
+            webviewView.onDidDispose(() => {
+                if (this._settingsView === webviewView) this._settingsView = undefined;
+            });
+            return;
+        }
+
         this._view = webviewView;
         webviewView.webview.options = { enableScripts: true, localResourceRoots: [this._extensionUri] };
         webviewView.webview.html = this._getHtmlForWebview();
@@ -310,7 +334,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 return;
             }
             this.prefillOnOpen();
-            this._view?.webview.postMessage({ type: 'focus' });
+            this.postToViews({ type: 'focus' });
         });
 
         webviewView.onDidDispose(() => {
@@ -318,12 +342,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             this.prefillTimer = undefined;
         });
 
-        webviewView.webview.onDidReceiveMessage(async (data) => {
+        const handler = async (data: any): Promise<void> => {
             switch (data.type) {
                 case 'search': {
                     const { value, isMatchCase, isRegex, include, exclude, filter, reason } = data;
                     if (!value || (!isRegex && value.length < 3)) {
-                        this._view?.webview.postMessage({ type: 'results', value: [] });
+                        this.postToViews({ type: 'results', value: [] });
                         return;
                     }
                     const generation = ++this.searchGeneration;
@@ -335,7 +359,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     }
                     log(`search "${value}" reason=${reason || 'unknown'} case=${!!isMatchCase} regex=${!!isRegex} include=[${(include || []).join(',')}] exclude=[${(exclude || []).join(',')}] filter="${filter || ''}" -> ${files.length} files, ${snippets.length} rows`);
                     this.lastSnapshot = { query: value, isRegex: !!isRegex, isMatchCase: !!isMatchCase, filter: filter || '', include: include || [], exclude: exclude || [], rows: snippets };
-                    this._view?.webview.postMessage({ type: 'results', value: snippets });
+                    this.postToViews({ type: 'results', value: snippets });
                     this.onResults?.(this.lastSnapshot, 'search');
                     break;
                 }
@@ -344,7 +368,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     await this.replaceInFile(file, line, query, replaceText, isMatchCase, isRegex);
                     const files = this.indexer.search(query, isRegex, { include, exclude });
                     const snippets = await this.getSnippets(files, query, isMatchCase, isRegex, filter);
-                    this._view?.webview.postMessage({ type: 'results', value: snippets });
+                    this.postToViews({ type: 'results', value: snippets });
                     this.lastSnapshot = { query, isRegex: !!isRegex, isMatchCase: !!isMatchCase, filter: filter || '', include: include || [], exclude: exclude || [], rows: snippets };
                     this.onResults?.(this.lastSnapshot, 'search');
                     break;
@@ -354,7 +378,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     await this.replaceAllInFiles(results, query, replaceText, isMatchCase, isRegex);
                     const files = this.indexer.search(query, isRegex, { include, exclude });
                     const snippets = await this.getSnippets(files, query, isMatchCase, isRegex, filter);
-                    this._view?.webview.postMessage({ type: 'results', value: snippets });
+                    this.postToViews({ type: 'results', value: snippets });
                     this.lastSnapshot = { query, isRegex: !!isRegex, isMatchCase: !!isMatchCase, filter: filter || '', include: include || [], exclude: exclude || [], rows: snippets };
                     this.onResults?.(this.lastSnapshot, 'search');
                     break;
@@ -364,8 +388,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     // Seed the webview with the stored settings: its hover delay and the
                     // settings form must not wait for the user to open the panel's settings.
                     this.sendConfig();
-                    this._view?.webview.postMessage({ type: 'locked', value: this.locked });
-                    this._view?.webview.postMessage({ type: 'focus' });
+                    this.postToViews({ type: 'locked', value: this.locked });
+                    this.postToViews({ type: 'focus' });
                     break;
                 }
                 case 'hover': {
@@ -394,7 +418,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     break;
                 }
                 case 'getPinned': {
-                    this._view?.webview.postMessage({ type: 'pinnedList', value: this.pinned });
+                    this.postToViews({ type: 'pinnedList', value: this.pinned });
                     break;
                 }
                 case 'pinSearch': {
@@ -417,7 +441,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         JSON.stringify([entry.query, entry.isMatchCase, entry.isRegex, entry.include, entry.exclude, entry.filter]);
                     this.pinned = [pin, ...this.pinned.filter(entry => signature(entry) !== signature(pin))].slice(0, 100);
                     await this.persistPinned();
-                    this._view?.webview.postMessage({ type: 'pinnedList', value: this.pinned });
+                    this.postToViews({ type: 'pinnedList', value: this.pinned });
                     // Pinning should surface the panel.
                     try { this._view?.show?.(true); } catch { /* host without show() */ }
                     vscode.window.showInformationMessage('Fast Index: pinned ' + query + '.');
@@ -427,11 +451,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const id = String(data.id || '');
                     this.pinned = this.pinned.filter(entry => entry.id !== id);
                     await this.persistPinned();
-                    this._view?.webview.postMessage({ type: 'pinnedList', value: this.pinned });
+                    this.postToViews({ type: 'pinnedList', value: this.pinned });
                     break;
                 }
                 case 'getCaches': {
-                    this._view?.webview.postMessage({ type: 'cacheList', value: await this.indexer.listCaches() });
+                    this.postToViews({ type: 'cacheList', value: await this.indexer.listCaches() });
                     break;
                 }
                 case 'deleteCaches': {
@@ -458,12 +482,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         'Reindex'
                     );
                     if (confirm !== 'Reindex') {
-                        this._view?.webview.postMessage({ type: 'cacheList', value: await this.indexer.listCaches() });
+                        this.postToViews({ type: 'cacheList', value: await this.indexer.listCaches() });
                         break;
                     }
 
                     await vscode.commands.executeCommand('vscode-fast-index.reindexFolders', roots);
-                    this._view?.webview.postMessage({ type: 'cacheList', value: await this.indexer.listCaches() });
+                    this.postToViews({ type: 'cacheList', value: await this.indexer.listCaches() });
                     break;
                 }
                 case 'rebuildIndex': {
@@ -559,21 +583,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     // that the index is stale, they never rebuild behind the user's back.
                     // Reflect what is actually stored, and re-run the current search so a new
                     // result limit takes effect immediately.
-                    this._view?.webview.postMessage({
+                    this.postToViews({
                         type: 'configData',
                         value: { ...next, saved: true, pendingFields: this.pendingIndexFields() }
                     });
                     break;
                 }
             }
-        });
+        };
+
+        this.webviewMessageHandler = handler;
+        webviewView.webview.onDidReceiveMessage(handler);
     }
 
     private async confirmAndDeleteCaches(requested: string[], staleOnly: boolean): Promise<void> {
         const entries = await this.indexer.listCaches();
         const chosen = entries.filter(entry => requested.includes(entry.file));
         if (chosen.length === 0) {
-            this._view?.webview.postMessage({ type: 'cacheList', value: entries });
+            this.postToViews({ type: 'cacheList', value: entries });
             return;
         }
 
@@ -596,7 +623,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             'Delete'
         );
         if (confirm !== 'Delete') {
-            this._view?.webview.postMessage({ type: 'cacheList', value: entries });
+            this.postToViews({ type: 'cacheList', value: entries });
             return;
         }
 
@@ -615,7 +642,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             });
             this.onCachesDeleted?.(liveRoots);
         }
-        this._view?.webview.postMessage({ type: 'cacheList', value: await this.indexer.listCaches() });
+        this.postToViews({ type: 'cacheList', value: await this.indexer.listCaches() });
     }
 
     /** Seeds the search box with the editor selection, or the word under the cursor. */
@@ -696,7 +723,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         const value = firstLine.length > 120 ? firstLine.slice(0, 120) : firstLine;
 
         log('prefill "' + value + '" (' + source + ')');
-        this._view?.webview.postMessage({ type: 'prefill', value });
+        this.postToViews({ type: 'prefill', value });
     }
 
     /** Replaces one match from the tree view's context menu and refreshes the results. */
@@ -711,7 +738,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         });
         const snippets = await this.getSnippets(files, snapshot.query, !!snapshot.isMatchCase, !!snapshot.isRegex, snapshot.filter);
         this.lastSnapshot = { ...snapshot, rows: snippets };
-        this._view?.webview.postMessage({ type: 'results', value: snippets });
+        this.postToViews({ type: 'results', value: snippets });
         this.onResults?.(this.lastSnapshot, 'search');
     }
 
@@ -933,16 +960,311 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         return snippets.slice(0, maxResults);
     }
 
-    private _getHtmlForWebview() {
-        const config = vscode.workspace.getConfiguration('fastIndex');
-        const debounceDelay = config.get<number>('debounceDelay') || 250;
-        const maxRecentSearches = Math.max(0, Math.min(100, Math.floor(config.get<number>('maxRecentSearches') ?? 20)));
+    /** The settings section: the same form, in its own document. */
+    private _getSettingsHtml(): string {
+        return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>${this.styles()}
+    html, body { overflow-y: auto; }
+    body.settings-only { display: block; overflow-y: auto; padding: 8px 10px 14px 10px; }
+    body.settings-only #settingsPanel { display: flex !important; }
+</style>
+</head>
+<body class="settings-only">
+${SidebarProvider.SETTINGS_FORM}
+<script>
+${SidebarProvider.SETTINGS_SCRIPT}
+</script>
+</body>
+</html>`;
+    }
 
+    /** Settings section script: the form saves as you edit, and owns the cache list. */
+    private static readonly SETTINGS_SCRIPT = `
+const vscode = acquireVsCodeApi();
+const $ = function (id) { return document.getElementById(id); };
+const textFields = ['confIncludeExt', 'confExcludePat', 'confMaxFileSize', 'confMaxResults', 'confMaxRecent', 'confPanelFont', 'confContextLines'];
+const changeFields = ['confFollowEditor', 'confPersistPinned', 'confAutoOpenResults', 'confAutoSearchResults', 'confShowContextLine', 'confHoverColor'];
+
+function collect() {
+    return {
+        includeExtensions: $('confIncludeExt').value,
+        excludePatterns: $('confExcludePat').value,
+        maxFileSizeKB: parseInt($('confMaxFileSize').value, 10),
+        maxResults: parseInt($('confMaxResults').value, 10),
+        maxRecentSearches: parseInt($('confMaxRecent').value, 10),
+        panelFontSize: parseInt($('confPanelFont').value, 10),
+        resultContextLines: $('confContextLines').value,
+        followEditor: $('confFollowEditor').checked,
+        persistPinnedSearches: $('confPersistPinned').checked,
+        autoOpenResults: $('confAutoOpenResults').checked,
+        autoSearchFromResults: $('confAutoSearchResults').checked,
+        showContextLine: $('confShowContextLine').checked,
+        hoverHighlightColor: $('confHoverColor').value
+    };
+}
+
+let saveTimer = 0;
+function flush() {
+    clearTimeout(saveTimer);
+    saveTimer = 0;
+    vscode.postMessage({ type: 'saveConfig', value: collect() });
+}
+function soon() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(flush, 350);
+}
+
+textFields.forEach(function (id) { const el = $(id); if (el) el.addEventListener('input', soon); });
+changeFields.forEach(function (id) { const el = $(id); if (el) el.addEventListener('change', flush); });
+
+$('reindexBtn').addEventListener('click', function () { vscode.postMessage({ type: 'rebuildIndex' }); });
+$('undoIndexBtn').addEventListener('click', function () { vscode.postMessage({ type: 'undoIndexSettings' }); });
+
+let cacheEntries = [];
+const selectedCaches = new Set();
+
+function formatSize(bytes) {
+    if (!bytes) return '0 KB';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
+    return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+}
+function formatDate(iso) {
+    try { return new Date(iso).toLocaleDateString(); } catch (err) { return ''; }
+}
+
+function updateCacheControls() {
+    const selected = Array.from(selectedCaches);
+    const stale = cacheEntries.filter(function (entry) { return !entry.exists; });
+    const deleteBtn = $('deleteCachesBtn');
+    deleteBtn.disabled = selected.length === 0;
+    deleteBtn.textContent = 'Delete selected';
+    const reindexBtn = $('reindexCachesBtn');
+    reindexBtn.disabled = selected.length === 0;
+    reindexBtn.textContent = selected.length ? 'Reindex (' + selected.length + ')' : 'Reindex selected';
+    const staleBtn = $('deleteStaleBtn');
+    staleBtn.disabled = stale.length === 0;
+    staleBtn.textContent = stale.length ? 'Delete stale (' + stale.length + ')' : 'Delete stale';
+    const all = $('cacheSelectAll');
+    all.checked = cacheEntries.length > 0 && selected.length === cacheEntries.length;
+    all.indeterminate = selected.length > 0 && selected.length < cacheEntries.length;
+    all.disabled = cacheEntries.length === 0;
+}
+
+function renderCaches() {
+    const list = $('cacheList');
+    list.innerHTML = '';
+    const summary = $('cacheSummary');
+    summary.textContent = cacheEntries.length
+        ? cacheEntries.length + ' folder' + (cacheEntries.length === 1 ? '' : 's')
+        : 'No cached folders';
+    if (cacheEntries.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'cache-empty';
+        empty.textContent = 'No cached folders yet.';
+        list.appendChild(empty);
+        updateCacheControls();
+        return;
+    }
+    cacheEntries.forEach(function (entry) {
+        const row = document.createElement('label');
+        row.className = 'cache-row';
+        const check = document.createElement('input');
+        check.type = 'checkbox';
+        check.className = 'cache-check';
+        check.value = entry.file;
+        check.checked = selectedCaches.has(entry.file);
+        check.addEventListener('change', function () {
+            if (check.checked) selectedCaches.add(entry.file);
+            else selectedCaches.delete(entry.file);
+            updateCacheControls();
+        });
+        const name = document.createElement('span');
+        name.className = 'cache-name';
+        name.textContent = entry.root;
+        name.title = entry.root + ' - ' + entry.name + (entry.inUse ? ' (used by this workspace)' : '');
+        const meta = document.createElement('span');
+        meta.className = 'cache-meta';
+        meta.textContent = formatDate(entry.builtAt) + ' - ' + formatSize(entry.size);
+        row.appendChild(check);
+        row.appendChild(name);
+        row.appendChild(meta);
+        if (!entry.exists) {
+            const missing = document.createElement('span');
+            missing.className = 'cache-missing';
+            missing.textContent = 'missing';
+            row.appendChild(missing);
+        }
+        list.appendChild(row);
+    });
+    updateCacheControls();
+}
+
+$('cacheSelectAll').addEventListener('change', function () {
+    selectedCaches.clear();
+    if ($('cacheSelectAll').checked) cacheEntries.forEach(function (entry) { selectedCaches.add(entry.file); });
+    renderCaches();
+});
+
+$('deleteCachesBtn').addEventListener('click', function () {
+    const files = Array.from(selectedCaches);
+    if (files.length === 0) return;
+    $('deleteCachesBtn').disabled = true;
+    $('deleteCachesBtn').textContent = 'Deleting...';
+    vscode.postMessage({ type: 'deleteCaches', files: files });
+});
+
+$('deleteStaleBtn').addEventListener('click', function () {
+    if ($('deleteStaleBtn').disabled) return;
+    $('deleteStaleBtn').disabled = true;
+    $('deleteStaleBtn').textContent = 'Deleting...';
+    vscode.postMessage({ type: 'deleteStaleCaches' });
+});
+
+$('reindexCachesBtn').addEventListener('click', function () {
+    const roots = cacheEntries.filter(function (entry) { return selectedCaches.has(entry.file); }).map(function (entry) { return entry.root; });
+    if (roots.length === 0) return;
+    $('reindexCachesBtn').disabled = true;
+    $('reindexCachesBtn').textContent = 'Reindexing...';
+    vscode.postMessage({ type: 'reindexCaches', roots: roots });
+});
+
+function fill(value) {
+    if (!value) return;
+    $('confIncludeExt').value = value.includeExtensions || '';
+    $('confExcludePat').value = value.excludePatterns || '';
+    $('confMaxFileSize').value = value.maxFileSizeKB || 512;
+    $('confMaxResults').value = value.maxResults || 50;
+    if (typeof value.maxRecentSearches === 'number') $('confMaxRecent').value = value.maxRecentSearches;
+    $('confPanelFont').value = value.panelFontSize || 14;
+    if (value.resultContextLines !== undefined) $('confContextLines').value = value.resultContextLines;
+    $('confFollowEditor').checked = value.followEditor !== false;
+    $('confPersistPinned').checked = value.persistPinnedSearches !== false;
+    $('confAutoOpenResults').checked = value.autoOpenResults === true;
+    $('confAutoSearchResults').checked = value.autoSearchFromResults === true;
+    $('confShowContextLine').checked = value.showContextLine !== false;
+    $('confHoverColor').value = value.hoverHighlightColor || 'charts.yellow';
+
+    const pending = Array.isArray(value.pendingFields) ? value.pendingFields : [];
+    const hint = $('reindexHint');
+    if (hint) hint.style.display = pending.length ? 'flex' : 'none';
+    const text = $('reindexText');
+    if (text) {
+        text.textContent = pending.length
+            ? 'Index is stale - changed: ' + pending.join(', ') + '. Reindex to commit them.'
+            : '';
+    }
+}
+
+window.addEventListener('message', function (event) {
+    const message = event.data;
+    if (message.type === 'configData') fill(message.value);
+    if (message.type === 'cacheList') {
+        cacheEntries = Array.isArray(message.value) ? message.value : [];
+        renderCaches();
+    }
+});
+
+vscode.postMessage({ type: 'getConfig' });
+vscode.postMessage({ type: 'getCaches' });
+`;
+
+    /** Shared stylesheet, used by the panel and by the settings section. */
+    /** The settings form, rendered by both the panel (hidden) and its own section. */
+    private static readonly SETTINGS_FORM = `
+                <div class="settings-panel" id="settingsPanel">
+                    <section class="settings-group">
+                        <h3 class="settings-group-title">Search Settings</h3>
+                        <div class="setting-item">
+                            <label>Panel Font Size (px)</label>
+                            <input type="number" id="confPanelFont" min="9" max="24" step="1" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Max Search Results</label>
+                            <input type="number" id="confMaxResults" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Recent Searches Remembered (0 = off)</label>
+                            <input type="number" id="confMaxRecent" min="0" max="100" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Results Context Lines (above and below)</label>
+                            <input type="number" id="confContextLines" min="0" max="50" step="1" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Hover Highlight Color</label>
+                            <select id="confHoverColor">
+                                <option value="charts.yellow">Yellow</option>
+                                <option value="list.highlightForeground">List highlight (theme default)</option>
+                                <option value="charts.blue">Blue</option>
+                                <option value="charts.green">Green</option>
+                                <option value="charts.orange">Orange</option>
+                                <option value="charts.purple">Purple</option>
+                                <option value="charts.red">Red</option>
+                                <option value="editorInfo.foreground">Info</option>
+                            </select>
+                        </div>
+                        <div class="setting-item setting-check">
+                            <label><input type="checkbox" id="confShowContextLine" /> Show the hit's context line under each result</label>
+                        </div>
+                        <div class="setting-item setting-check">
+                            <label><input type="checkbox" id="confFollowEditor" /> Auto Search: Follows text editor cursor and selection</label>
+                        </div>
+                        <div class="setting-item setting-check">
+                            <label><input type="checkbox" id="confAutoSearchResults" /> Auto Search from the results window (selecting a line there fills the search box)</label>
+                        </div>
+                        <div class="setting-item setting-check">
+                            <label><input type="checkbox" id="confPersistPinned" /> Keep pinned searches between sessions</label>
+                        </div>
+                        <div class="setting-item setting-check">
+                            <label><input type="checkbox" id="confAutoOpenResults" /> Open the results editor automatically when a search finds matches</label>
+                        </div>
+                    </section>
+
+                    <section class="settings-group">
+                        <h3 class="settings-group-title">Indexing</h3>
+                        <p class="settings-group-note">These shape the index itself. Changing them makes the existing index stale until you reindex.</p>
+                        <div class="setting-item">
+                            <label>Include Extensions (e.g., ts,js,md)</label>
+                            <input type="text" id="confIncludeExt" placeholder="Leave empty for all" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Exclude Patterns (Glob)</label>
+                            <input type="text" id="confExcludePat" placeholder="{**/node_modules/**,...}" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Max File Size (KB)</label>
+                            <input type="number" id="confMaxFileSize" />
+                        </div>
+                        <div class="reindex-banner" id="reindexHint" style="display: none;">
+                            <span class="reindex-text" id="reindexText"></span>
+                            <button id="undoIndexBtn" class="link-btn" title="Restore the include/exclude/size settings the current index was built with">Undo changes</button>
+                        </div>
+                        <button id="reindexBtn" title="Rebuild the index with the current settings.">🔁 Reindex</button>
+                    </section>
+
+                    <section class="settings-group">
+                        <h3 class="settings-group-title">Cached indexes</h3>
+                        <div class="cache-section">
+                            <div class="cache-head">
+                                <label title="Select every cached folder"><input type="checkbox" id="cacheSelectAll" /> Select all</label>
+                                <span class="cache-summary" id="cacheSummary">Loading…</span>
+                            </div>
+                            <div class="cache-list" id="cacheList"></div>
+                            <div class="cache-actions">
+                                <button id="reindexCachesBtn" disabled>Reindex selected</button>
+                                <button id="deleteCachesBtn" class="danger" disabled>Delete selected</button>
+                                <button id="deleteStaleBtn" class="danger" disabled>Delete stale</button>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+`;
+
+    private styles(): string {
         return `
-            <!DOCTYPE html>
-            <html lang="en">
-            <head>
-                <style>
                     html, body { height: 100%; }
                     body { font-family: var(--vscode-font-family); font-size: ${this.panelFontSize()}px; padding: 0; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; }
                     /* Settings are tall: let the whole panel scroll so every group is reachable. */
@@ -1104,7 +1426,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
                     .snippet { font-family: monospace; font-size: 0.85em; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
                     .highlight { background-color: var(--vscode-editor-findMatchHighlightBackground); color: var(--vscode-editor-foreground); border-radius: 2px; font-weight: bold; }
-                </style>
+`;
+    }
+
+    private _getHtmlForWebview() {
+        const config = vscode.workspace.getConfiguration('fastIndex');
+        const debounceDelay = config.get<number>('debounceDelay') || 250;
+        const maxRecentSearches = Math.max(0, Math.min(100, Math.floor(config.get<number>('maxRecentSearches') ?? 20)));
+
+        return `
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <style>${this.styles()}</style>
+                <!-- Settings render in their own section; this copy stays hidden. -->
+                <style>#settingsPanel { display: none !important; }</style>
             </head>
             <body>
                 <div class="content">
@@ -1153,93 +1489,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     </div>
                 </div>
                 
-                <div class="settings-panel" id="settingsPanel">
-                    <section class="settings-group">
-                        <h3 class="settings-group-title">Search Settings</h3>
-                        <div class="setting-item">
-                            <label>Panel Font Size (px)</label>
-                            <input type="number" id="confPanelFont" min="9" max="24" step="1" />
-                        </div>
-                        <div class="setting-item">
-                            <label>Max Search Results</label>
-                            <input type="number" id="confMaxResults" />
-                        </div>
-                        <div class="setting-item">
-                            <label>Recent Searches Remembered (0 = off)</label>
-                            <input type="number" id="confMaxRecent" min="0" max="100" />
-                        </div>
-                        <div class="setting-item">
-                            <label>Results Context Lines (above and below)</label>
-                            <input type="number" id="confContextLines" min="0" max="50" step="1" />
-                        </div>
-                        <div class="setting-item">
-                            <label>Hover Highlight Color</label>
-                            <select id="confHoverColor">
-                                <option value="charts.yellow">Yellow</option>
-                                <option value="list.highlightForeground">List highlight (theme default)</option>
-                                <option value="charts.blue">Blue</option>
-                                <option value="charts.green">Green</option>
-                                <option value="charts.orange">Orange</option>
-                                <option value="charts.purple">Purple</option>
-                                <option value="charts.red">Red</option>
-                                <option value="editorInfo.foreground">Info</option>
-                            </select>
-                        </div>
-                        <div class="setting-item setting-check">
-                            <label><input type="checkbox" id="confShowContextLine" /> Show the hit's context line under each result</label>
-                        </div>
-                        <div class="setting-item setting-check">
-                            <label><input type="checkbox" id="confFollowEditor" /> Auto Search: Follows text editor cursor and selection</label>
-                        </div>
-                        <div class="setting-item setting-check">
-                            <label><input type="checkbox" id="confAutoSearchResults" /> Auto Search from the results window (selecting a line there fills the search box)</label>
-                        </div>
-                        <div class="setting-item setting-check">
-                            <label><input type="checkbox" id="confPersistPinned" /> Keep pinned searches between sessions</label>
-                        </div>
-                        <div class="setting-item setting-check">
-                            <label><input type="checkbox" id="confAutoOpenResults" /> Open the results editor automatically when a search finds matches</label>
-                        </div>
-                    </section>
-
-                    <section class="settings-group">
-                        <h3 class="settings-group-title">Indexing</h3>
-                        <p class="settings-group-note">These shape the index itself. Changing them makes the existing index stale until you reindex.</p>
-                        <div class="setting-item">
-                            <label>Include Extensions (e.g., ts,js,md)</label>
-                            <input type="text" id="confIncludeExt" placeholder="Leave empty for all" />
-                        </div>
-                        <div class="setting-item">
-                            <label>Exclude Patterns (Glob)</label>
-                            <input type="text" id="confExcludePat" placeholder="{**/node_modules/**,...}" />
-                        </div>
-                        <div class="setting-item">
-                            <label>Max File Size (KB)</label>
-                            <input type="number" id="confMaxFileSize" />
-                        </div>
-                        <div class="reindex-banner" id="reindexHint" style="display: none;">
-                            <span class="reindex-text" id="reindexText"></span>
-                            <button id="undoIndexBtn" class="link-btn" title="Restore the include/exclude/size settings the current index was built with">Undo changes</button>
-                        </div>
-                        <button id="reindexBtn" title="Rebuild the index with the current settings.">🔁 Reindex</button>
-                    </section>
-
-                    <section class="settings-group">
-                        <h3 class="settings-group-title">Cached indexes</h3>
-                        <div class="cache-section">
-                            <div class="cache-head">
-                                <label title="Select every cached folder"><input type="checkbox" id="cacheSelectAll" /> Select all</label>
-                                <span class="cache-summary" id="cacheSummary">Loading…</span>
-                            </div>
-                            <div class="cache-list" id="cacheList"></div>
-                            <div class="cache-actions">
-                                <button id="reindexCachesBtn" disabled>Reindex selected</button>
-                                <button id="deleteCachesBtn" class="danger" disabled>Delete selected</button>
-                                <button id="deleteStaleBtn" class="danger" disabled>Delete stale</button>
-                            </div>
-                        </div>
-                    </section>
-                </div>
+                ${SidebarProvider.SETTINGS_FORM}
                 
                 <div class="results-toolbar" id="resultsToolbar" style="display: none;">
                     <button id="viewToggleBtn" class="tool-btn" title="Switch between flat list and directory tree">🌳 Tree</button>

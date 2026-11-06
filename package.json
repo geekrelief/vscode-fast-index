@@ -3,7 +3,7 @@
   "displayName": "Fast Project Indexer ",
   "description": "Lightning-fast text search for VS Code using a background inverted trigram index.",
   "publisher": "eric",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "engines": {
     "vscode": "^1.108.0"
   },
@@ -52,6 +52,11 @@
         {
           "id": "fast-index.pins",
           "name": "Pinned Searches"
+        },
+        {
+          "type": "webview",
+          "id": "fast-index.settings",
+          "name": "Settings"
         }
       ]
     },
