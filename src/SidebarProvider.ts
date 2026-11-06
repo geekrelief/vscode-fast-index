@@ -35,7 +35,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     public setStatus(text: string, state: 'busy' | 'ready' | 'idle' = 'busy'): void {
         this._statusText = text;
         this._statusState = state;
-        this.postToViews({ type: 'status', value: { text, state } });
+        // The status lives in the view title bar, not in a row of its own.
+        this.updateViewDescription();
+    }
+
+    /** Puts a compact status next to the view title, so the panel keeps that height. */
+    private updateViewDescription(): void {
+        if (!this._view) return;
+        const compact = this._statusText
+            .replace(/^Ready\s*·\s*/i, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        this._view.description = compact.length > 60 ? compact.slice(0, 59) + '…' : compact;
     }
 
     private static escapeHtml(value: string): string {
@@ -336,6 +347,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this._view = webviewView;
         webviewView.webview.options = { enableScripts: true, localResourceRoots: [this._extensionUri] };
         webviewView.webview.html = this._getHtmlForWebview();
+        this.updateViewDescription();
 
         // When the view is revealed, seed the search box from the editor and focus it.
         webviewView.onDidChangeVisibility(() => {
@@ -1465,10 +1477,6 @@ vscode.postMessage({ type: 'getCaches' });
             <body>
                 <div class="content">
                 <div class="tree-menu" id="treeMenu" style="display: none;"></div>
-                <div class="status-row" id="statusRow">
-                    <span class="status-dot ${this._statusState}" id="statusDot"></span>
-                    <span id="statusText">${SidebarProvider.escapeHtml(this._statusText)}</span>
-                </div>
 
                 <div class="search-panel" id="mainSearchPanel">
                     <div class="input-group">
@@ -1556,8 +1564,6 @@ vscode.postMessage({ type: 'getCaches' });
                     const collapseAllBtn = document.getElementById('collapseAllBtn');
                     const resultsCount = document.getElementById('resultsCount');
                     const lockBadge = document.getElementById('lockBadge');
-                    const statusTextEl = document.getElementById('statusText');
-                    const statusDotEl = document.getElementById('statusDot');
 
                     let viewMode = 'tree';
                     let collapsedDirs = new Set();
@@ -2346,8 +2352,6 @@ vscode.postMessage({ type: 'getCaches' });
                         }
 
                         if (message.type === 'status') {
-                            statusTextEl.textContent = message.value.text;
-                            statusDotEl.className = 'status-dot ' + message.value.state;
                             statusState = message.value.state;
                             if (resultsDiv.querySelector('.loading-hint')) renderResults();
                         }

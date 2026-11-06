@@ -83,7 +83,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog
 
-### 0.8.0 → 0.21.2 — native results tree, hover jump, pinned section, settings section, results editor and settings fixes
+### 0.8.0 → 0.21.3 — native results tree, hover jump, pinned section, settings section, results editor and settings fixes
 
 #### Results tab in the editor
 
@@ -144,7 +144,9 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 * Directory rows carry **no icon** — the tree is a result list, not a file browser. File names are **bold**; directory nodes are semi-bold (600) so the two levels stay distinguishable.
 * New **`fastIndex.showContextLine`** toggle to hide the matched line under each result for a compact file-and-line list.
 
-#### Section layout (0.21.2)
+#### Section layout (0.21.3)
+
+* **The status moved into the view title bar.** `WebviewView.description` renders next to "Fast Index Search", so the panel no longer spends a row on it: the index state reads `Loading index…`, `1,234 files` (the `Ready · ` prefix is dropped) or `Not indexed yet`, whitespace collapsed and capped at 60 characters. Nothing else in the panel changed size.
 
 * **The search panel can no longer hide its own fields.** When the sections below squeeze its pane, the panel body now scrolls (`overflow-y: auto`, content sized to its own height instead of being flex-shrunk), so *Skip*, *Only in*, the replace field and Replace All stay reachable instead of being clipped — and focusing a field scrolls it into view. The pane height itself is the workbench splitview's, which the extension cannot clamp.
 
