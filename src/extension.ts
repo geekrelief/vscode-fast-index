@@ -80,6 +80,7 @@ export async function activate(context: vscode.ExtensionContext) {
             if (picked.id === 'log') searchLog.show(true);
         })
     );
+    context.subscriptions.push({ dispose: () => sidebarProvider.dispose() });
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider("fast-index.sidebar", sidebarProvider, {
             webviewOptions: {

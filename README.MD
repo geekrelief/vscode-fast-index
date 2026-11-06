@@ -76,7 +76,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog — current development session
 
-Everything below landed in one session (0.3.6 → 0.10.3).
+Everything below landed in one session (0.3.6 → 0.10.4).
 
 ### Search UI
 

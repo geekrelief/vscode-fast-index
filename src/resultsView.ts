@@ -45,9 +45,19 @@ export class ResultsView implements vscode.Disposable {
         return this.disposables;
     }
 
+    /**
+     * True when the results tab is actually open. `workspace.textDocuments` is not
+     * enough: a closed virtual document can stay loaded, which would make sync()
+     * refresh an invisible document instead of reopening the tab.
+     */
     private isOpen(): boolean {
         const target = ResultsDocumentProvider.uri.toString();
-        return vscode.workspace.textDocuments.some(document => document.uri.toString() === target);
+        return vscode.window.tabGroups.all.some(group =>
+            group.tabs.some(tab => {
+                const input = tab.input;
+                return input instanceof vscode.TabInputText && input.uri.toString() === target;
+            })
+        );
     }
 
     /** Opens the results tab, or brings the existing one forward. */

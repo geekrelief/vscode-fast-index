@@ -39,6 +39,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     private pinned: PinnedSearch[] = [];
     private locked = false;
+    private readonly disposables: vscode.Disposable[] = [];
     private viewMode: 'tree' | 'flat' = 'tree';
     private searchGeneration = 0;
     private lastSnapshot: { query: string; isRegex: boolean; isMatchCase: boolean; filter: string; include: string[]; exclude: string[]; rows: any[] } | undefined;
@@ -109,6 +110,49 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 this.pinned = stored.filter(entry => entry && typeof entry.query === 'string').slice(0, 100);
             }
         }
+
+        // Registered for the provider's lifetime, not the webview's: the last deliberate
+        // caret has to be known even when the panel has never been opened in this window.
+        this.disposables.push(
+            vscode.window.onDidChangeTextEditorSelection(event => this.onEditorSelection(event)),
+            vscode.window.onDidChangeActiveTextEditor(editor => {
+                // Switching editors is not a cursor move: only an explicit selection counts.
+                if (editor && !editor.selection.isEmpty) this.schedulePrefill();
+            })
+        );
+    }
+
+    /** Tracks where the user last clicked, so opening the panel can tell that from a file open. */
+    private onEditorSelection(event: vscode.TextEditorSelectionChangeEvent): void {
+        if (event.textEditor !== vscode.window.activeTextEditor) return;
+        // Opening a file parks the cursor at 0,0 and fires a "Command" selection
+        // change; only real pointer/keyboard moves may seed the search box.
+        if (event.kind === vscode.TextEditorSelectionChangeKind.Command) return;
+        const active = event.selections[0]?.active;
+        if (active) {
+            this.lastUserCursor = {
+                uri: event.textEditor.document.uri.toString(),
+                line: active.line,
+                character: active.character
+            };
+        }
+        this.schedulePrefill();
+    }
+
+    /** Debounced follow: only runs while the panel is on screen. */
+    private schedulePrefill(): void {
+        if (this._view?.visible !== true) return;
+        if (vscode.workspace.getConfiguration('fastIndex').get<boolean>('followEditor') === false) return;
+        if (Date.now() < this.suppressPrefillUntil) return;
+        if (this.prefillTimer) clearTimeout(this.prefillTimer);
+        this.prefillTimer = setTimeout(() => this.prefillFromEditor(), 250);
+    }
+
+    public dispose(): void {
+        if (this.prefillTimer) clearTimeout(this.prefillTimer);
+        this.prefillTimer = undefined;
+        this.disposables.forEach(disposable => disposable.dispose());
+        this.disposables.length = 0;
     }
 
     private async persistPinned(): Promise<void> {
@@ -129,39 +173,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             this._view?.webview.postMessage({ type: 'focus' });
         });
 
-        // While the panel is open, follow the editor: selection changes and cursor
-        // moves refresh the search box (unless the user is typing in it).
-        const schedulePrefill = () => {
-            if (!webviewView.visible) return;
-            if (vscode.workspace.getConfiguration('fastIndex').get<boolean>('followEditor') === false) return;
-            if (Date.now() < this.suppressPrefillUntil) return;
-            if (this.prefillTimer) clearTimeout(this.prefillTimer);
-            this.prefillTimer = setTimeout(() => this.prefillFromEditor(), 250);
-        };
-
-        const followDisposables: vscode.Disposable[] = [
-            vscode.window.onDidChangeTextEditorSelection(event => {
-                if (event.textEditor !== vscode.window.activeTextEditor) return;
-                // Opening a file parks the cursor at 0,0 and fires a "Command" selection
-                // change; only real pointer/keyboard moves may seed the search box.
-                if (event.kind === vscode.TextEditorSelectionChangeKind.Command) return;
-                const active = event.selections[0]?.active;
-                if (active) {
-                    this.lastUserCursor = {
-                        uri: event.textEditor.document.uri.toString(),
-                        line: active.line,
-                        character: active.character
-                    };
-                }
-                schedulePrefill();
-            }),
-            vscode.window.onDidChangeActiveTextEditor(editor => {
-                // Switching editors is not a cursor move: only an explicit selection counts.
-                if (editor && !editor.selection.isEmpty) schedulePrefill();
-            }),
-        ];
         webviewView.onDidDispose(() => {
-            followDisposables.forEach(disposable => disposable.dispose());
             if (this.prefillTimer) clearTimeout(this.prefillTimer);
             this.prefillTimer = undefined;
         });
