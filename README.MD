@@ -48,6 +48,7 @@ Three of these settings shape the index itself: **Include Extensions**, **Exclud
 * **Exclude Patterns:** Glob patterns for files/folders to ignore (e.g., `{**/node_modules/**,**/.git/**}`).
 * **Max File Size (KB):** Prevent the indexer from choking on huge minified or binary files (default is `512` KB).
 * **Max Search Results:** Limit the number of snippets shown to keep the UI responsive (default is `50`).
+* **Show the hit's context line under each result:** on/off (default on, also `fastIndex.showContextLine`). Turn it off for a compact file-and-line list; the list re-renders as soon as you toggle it.
 * **Panel Font Size (px):** Text size for the panel — search results, pinned searches, buttons — default `14`, range `9`–`24`. Everything in the panel scales from it, and the change is visible as you type.
 * **Hover Jump Delay:** Milliseconds to rest the pointer on a result before the results editor jumps to that line (default `1500`, 0 = instant).
 * **Results Context Lines:** Lines shown above and below each match in the results editor (default `2`).
@@ -81,7 +82,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog
 
-### 0.8.0 → 0.13.0 — results editor, preview removal, prefill and settings fixes
+### 0.8.0 → 0.13.1 — results editor, preview removal, prefill and settings fixes
 
 #### Results tab in the editor
 
@@ -120,6 +121,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 * `fastIndex.previewContextLines` → **`fastIndex.resultContextLines`**.
 * New **`fastIndex.autoOpenResults`** (default off).
 * New **`fastIndex.panelFontSize`** (default 14 px, range 9–24): the webview's root font size, so search results, pinned searches and buttons all scale together. The panel is rendered with it and resizes as you type.
+* New **`fastIndex.showContextLine`** (default on): whether each result in the panel shows the matched line of code under its file name. Toggling it re-renders the current results immediately.
 * New **`fastIndex.autoSearchFromResults`** (default off): whether selecting a line in the results editor may fill the search box. The webview now also receives all settings when it becomes ready, so `hoverJumpDelay` (and the rest) apply immediately instead of waiting for the settings panel to be opened.
 * All of them relabelled in the panel's ⚙️ settings.
 

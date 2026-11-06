@@ -73,6 +73,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 persistPinnedSearches: config.get<boolean>('persistPinnedSearches') !== false,
                 autoOpenResults: config.get<boolean>('autoOpenResults') === true,
                 autoSearchFromResults: config.get<boolean>('autoSearchFromResults') === true,
+                showContextLine: config.get<boolean>('showContextLine') !== false,
                 pendingFields: this.pendingIndexFields()
             }
         });
@@ -476,7 +477,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         followEditor: config.get<boolean>('followEditor') ?? true,
                         persistPinnedSearches: config.get<boolean>('persistPinnedSearches') !== false,
                         autoOpenResults: config.get<boolean>('autoOpenResults') === true,
-                        autoSearchFromResults: config.get<boolean>('autoSearchFromResults') === true
+                        autoSearchFromResults: config.get<boolean>('autoSearchFromResults') === true,
+                        showContextLine: config.get<boolean>('showContextLine') !== false
                     };
 
                     const clampNumber = (value: unknown, fallback: number, min: number, max: number): number => {
@@ -498,7 +500,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         followEditor: typeof input.followEditor === 'boolean' ? input.followEditor : current.followEditor,
                         persistPinnedSearches: typeof input.persistPinnedSearches === 'boolean' ? input.persistPinnedSearches : current.persistPinnedSearches,
                         autoOpenResults: typeof input.autoOpenResults === 'boolean' ? input.autoOpenResults : current.autoOpenResults,
-                        autoSearchFromResults: typeof input.autoSearchFromResults === 'boolean' ? input.autoSearchFromResults : current.autoSearchFromResults
+                        autoSearchFromResults: typeof input.autoSearchFromResults === 'boolean' ? input.autoSearchFromResults : current.autoSearchFromResults,
+                        showContextLine: typeof input.showContextLine === 'boolean' ? input.showContextLine : current.showContextLine
                     };
 
                     // Each key is written on its own so one failure cannot block the rest.
@@ -1067,6 +1070,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             <input type="number" id="confContextLines" min="0" max="50" step="1" />
                         </div>
                         <div class="setting-item setting-check">
+                            <label><input type="checkbox" id="confShowContextLine" /> Show the hit's context line under each result</label>
+                        </div>
+                        <div class="setting-item setting-check">
                             <label><input type="checkbox" id="confFollowEditor" /> Auto Search: Follows text editor cursor and selection</label>
                         </div>
                         <div class="setting-item setting-check">
@@ -1169,6 +1175,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const confMaxFileSize = document.getElementById('confMaxFileSize');
                     const confMaxResults = document.getElementById('confMaxResults');
                     const confPanelFont = document.getElementById('confPanelFont');
+                    const confShowContextLine = document.getElementById('confShowContextLine');
                     const historyList = document.getElementById('historyList');
                     const historyBtn = document.getElementById('historyBtn');
                     const treeMenu = document.getElementById('treeMenu');
@@ -1212,6 +1219,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     let applyingPrefill = false;
                     let pinnedSearches = [];
                     let hoverDelay = 1500;
+                    let showContextLine = true;
                     let locked = false;
                     let pinnedVisible = true;
                     let pinnedHeight = 170;
@@ -1400,7 +1408,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             hoverJumpDelay: confHoverDelay.value,
                             resultContextLines: confContextLines.value,
                             autoOpenResults: confAutoOpenResults?.checked === true,
-                            autoSearchFromResults: confAutoSearchResults?.checked === true
+                            autoSearchFromResults: confAutoSearchResults?.checked === true,
+                            showContextLine: confShowContextLine?.checked !== false
                         };
                     }
 
@@ -1429,7 +1438,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             });
                         });
 
-                    [confFollowEditor, confPersistPinned, confAutoOpenResults, confAutoSearchResults]
+                    [confFollowEditor, confPersistPinned, confAutoOpenResults, confAutoSearchResults, confShowContextLine]
                         .filter(Boolean)
                         .forEach(function (field) {
                             field.addEventListener('change', flushConfig);
@@ -1686,7 +1695,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             : highlightText(item.text, currentQueryText(), isMatchCase, isRegex);
 
                         div.appendChild(header);
-                        div.appendChild(snippet);
+                        // The hit's context line is optional: turning it off leaves a compact
+                        // file-and-line list that survives narrow side bars.
+                        if (showContextLine || item.fileNameOnly) div.appendChild(snippet);
                         div.onclick = () => {
                             rememberSearch(currentQueryText());
                             vscode.postMessage({ type: 'openFile', value: { file: item.file, line: item.line } });
@@ -2141,6 +2152,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             confContextLines.value = message.value.resultContextLines ?? 2;
                             if (confAutoOpenResults) confAutoOpenResults.checked = message.value.autoOpenResults === true;
                             if (confAutoSearchResults) confAutoSearchResults.checked = message.value.autoSearchFromResults === true;
+                            if (confShowContextLine) confShowContextLine.checked = message.value.showContextLine !== false;
+                            const showContext = message.value.showContextLine !== false;
+                            if (showContext !== showContextLine) {
+                                showContextLine = showContext;
+                                renderResults();
+                            }
                             hoverDelay = Number.isFinite(Number(message.value.hoverJumpDelay)) ? Math.max(0, Number(message.value.hoverJumpDelay)) : 1500;
                             if (typeof message.value.maxRecentSearches === 'number') {
                                 confMaxRecent.value = message.value.maxRecentSearches;
