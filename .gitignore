@@ -1,5 +1,6 @@
 *.log
 *log.txt
+*.vsix
 .env
 node_modules/
 out/
@@ -27,6 +28,8 @@ __MACOSX
 !.vscode
 !.vscodeignore
 !src
+!media
+!LICENSE
 !tsconfig.json
 !package.json
 !package-lock.json

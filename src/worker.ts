@@ -1,33 +1,58 @@
 import { parentPort } from 'worker_threads';
 import * as fs from 'fs';
+import { computeTrigrams } from './trigrams';
 
-function getTrigrams(text: string): string[] {
-    const trigrams = new Set<string>();
-    const words = text.split(/\W+/).filter(w => w.length >= 3);
-    for (const word of words) {
-        const lowerWord = word.toLowerCase();
-        for (let i = 0; i <= lowerWord.length - 3; i++) {
-            trigrams.add(lowerWord.substring(i, i + 3));
-        }
-    }
-    return Array.from(trigrams);
+interface BatchMessage {
+    type: 'processBatch';
+    paths: string[];
+    mtimes: Float64Array;
+    sizes: Uint32Array;
+    force: boolean;
+    maxFileSizeKB: number;
 }
 
-parentPort?.on('message', (message: { type: string, filePath?: string, filePaths?: string[], maxFileSizeKB?: number }) => {
+interface SingleMessage {
+    type: 'processSingle';
+    filePath: string;
+    maxFileSizeKB: number;
+}
+
+
+
+parentPort?.on('message', (message: BatchMessage | SingleMessage) => {
     const maxSizeBytes = (message.maxFileSizeKB || 512) * 1024;
 
-    if (message.type === 'processBatch' && message.filePaths) {
-        for (const filePath of message.filePaths) {
+    if (message.type === 'processBatch') {
+        const { paths, mtimes, sizes, force } = message;
+        let skipped = 0;
+
+        for (let i = 0; i < paths.length; i++) {
+            const filePath = paths[i];
             try {
                 const stats = fs.statSync(filePath);
                 if (stats.size > maxSizeBytes) continue;
 
+                // Unchanged since the index was written: no read, no trigram pass.
+                if (!force && stats.mtimeMs === mtimes[i] && stats.size === sizes[i]) {
+                    skipped++;
+                    continue;
+                }
+
                 const content = fs.readFileSync(filePath, 'utf-8');
-                const trigrams = getTrigrams(content);
-                parentPort?.postMessage({ type: 'fileDone', filePath, trigrams });
-            } catch (e) {}
+                const trigrams = computeTrigrams(content);
+                parentPort?.postMessage({
+                    type: 'fileDone',
+                    filePath,
+                    trigrams,
+                    mtime: stats.mtimeMs,
+                    size: stats.size,
+                });
+            } catch (e) {
+                /* unreadable file: leave its previous entry alone */
+            }
         }
-        parentPort?.postMessage({ type: 'batchDone' });
+        parentPort?.postMessage({ type: 'batchDone', skipped });
+        return;
     }
 
     if (message.type === 'processSingle' && message.filePath) {
@@ -36,8 +61,16 @@ parentPort?.on('message', (message: { type: string, filePath?: string, filePaths
             if (stats.size > maxSizeBytes) return;
 
             const content = fs.readFileSync(message.filePath, 'utf-8');
-            const trigrams = getTrigrams(content);
-            parentPort?.postMessage({ type: 'singleDone', filePath: message.filePath, trigrams });
-        } catch (e) {}
+            const trigrams = computeTrigrams(content);
+            parentPort?.postMessage({
+                type: 'singleDone',
+                filePath: message.filePath,
+                trigrams,
+                mtime: stats.mtimeMs,
+                size: stats.size,
+            });
+        } catch (e) {
+            /* file vanished between the watcher event and the read */
+        }
     }
 });

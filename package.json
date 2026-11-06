@@ -3,9 +3,9 @@
   "displayName": "Fast Project Indexer ",
   "description": "Lightning-fast text search for VS Code using a background inverted trigram index.",
   "publisher": "eric",
-  "version": "0.0.1",
+  "version": "0.7.5",
   "engines": {
-    "vscode": "^1.109.0"
+    "vscode": "^1.108.0"
   },
   "categories": [
     "Other"
@@ -22,6 +22,12 @@
     "large project"
   ],
   "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onView:fast-index.sidebar",
+    "onCommand:vscode-fast-index.buildIndex"
+  ],
+  "license": "MIT",
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -29,6 +35,13 @@
           "id": "fast-index-explorer",
           "title": "Fast Index",
           "icon": "$(zap)"
+        }
+      ],
+      "panel": [
+        {
+          "id": "fast-index-preview-container",
+          "title": "Fast Index Preview",
+          "icon": "media/preview.svg"
         }
       ]
     },
@@ -39,14 +52,84 @@
           "id": "fast-index.sidebar",
           "name": "Fast Index Search"
         }
+      ],
+      "fast-index-preview-container": [
+        {
+          "type": "webview",
+          "id": "fast-index-preview",
+          "name": "Preview"
+        }
       ]
     },
     "commands": [
       {
         "command": "vscode-fast-index.buildIndex",
         "title": "Fast Index: Build Project Index"
+      },
+      {
+        "command": "vscode-fast-index.openPreview",
+        "title": "Fast Index: Open Preview Panel"
+      },
+      {
+        "command": "vscode-fast-index.lockResults",
+        "title": "Lock Results",
+        "icon": "$(lock)"
+      },
+      {
+        "command": "vscode-fast-index.unlockResults",
+        "title": "Unlock Results",
+        "icon": "$(unlock)"
+      },
+      {
+        "command": "vscode-fast-index.toggleSettings",
+        "title": "Settings",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "vscode-fast-index.showMenu",
+        "title": "Menu",
+        "icon": "$(menu)"
+      },
+      {
+        "command": "vscode-fast-index.showLog",
+        "title": "Fast Index: Show Search Log",
+        "icon": "$(output)"
+      },
+      {
+        "command": "vscode-fast-index.openResultsInEditor",
+        "title": "Fast Index: Open Results in Editor",
+        "icon": "$(book)"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "vscode-fast-index.unlockResults",
+          "when": "view == fast-index.sidebar && fastIndex.locked",
+          "group": "navigation@1"
+        },
+        {
+          "command": "vscode-fast-index.lockResults",
+          "when": "view == fast-index.sidebar && !fastIndex.locked",
+          "group": "navigation@1"
+        },
+        {
+          "command": "vscode-fast-index.toggleSettings",
+          "when": "view == fast-index.sidebar",
+          "group": "navigation@2"
+        },
+        {
+          "command": "vscode-fast-index.openResultsInEditor",
+          "when": "view == fast-index.sidebar",
+          "group": "navigation@3"
+        },
+        {
+          "command": "vscode-fast-index.showMenu",
+          "when": "view == fast-index.sidebar",
+          "group": "navigation@3"
+        }
+      ]
+    },
     "configuration": {
       "title": "Fast Indexer",
       "properties": {
@@ -57,13 +140,19 @@
         },
         "fastIndex.excludePatterns": {
           "type": "string",
-          "default": "{**/node_modules/**,**/.git/**,**/dist/**,**/out/**,**/*.png,**/*.jpg,**/*.svg}",
-          "description": "File and folder patterns to ignore during indexing (Glob format)."
+          "default": "{**/node_modules/**,**/.git/**,**/.*/**,**/dist/**,**/out/**,**/Binaries/**,**/Intermediate/**,**/DerivedDataCache/**,**/Saved/**,**/Content/**,**/*.png,**/*.jpg,**/*.jpeg,**/*.svg,**/*.uasset,**/*.umap}",
+          "description": "File and folder patterns to ignore during indexing (Glob format). Hidden folders (names starting with '.') are excluded by default."
         },
         "fastIndex.maxFileSizeKB": {
           "type": "number",
           "default": 512,
           "description": "Maximum file size in kilobytes to index. Files larger than this will be skipped."
+        },
+        "fastIndex.maxResultsPerFile": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "description": "Maximum matching lines shown per file (0 = no limit). Keeps one huge file from filling the whole result list."
         },
         "fastIndex.maxResults": {
           "type": "number",
@@ -74,6 +163,42 @@
           "type": "number",
           "default": 250,
           "description": "Input delay (in milliseconds) before triggering the search."
+        },
+        "fastIndex.previewContextLines": {
+          "type": "number",
+          "default": 2,
+          "minimum": 0,
+          "maximum": 50,
+          "description": "Lines shown above and below the match in the preview (2 = two above, two below)."
+        },
+        "fastIndex.inlinePreview": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show a read-only preview pane inside the Fast Index sidebar while hovering a result. Off by default: use the Fast Index Preview panel in the bottom panel instead."
+        },
+        "fastIndex.previewHoverDelay": {
+          "type": "number",
+          "default": 1500,
+          "minimum": 0,
+          "maximum": 10000,
+          "description": "Milliseconds to rest the pointer on a search result before the inline preview loads. 0 shows it immediately."
+        },
+        "fastIndex.persistPinnedSearches": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keep pinned searches in the workspace storage so they survive a restart. When off, pins live only for the current session."
+        },
+        "fastIndex.followEditor": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keep the search box in sync with the editor: use the selection, or the word under the cursor, while the panel is open."
+        },
+        "fastIndex.maxRecentSearches": {
+          "type": "number",
+          "default": 20,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "How many recent searches the search box remembers (0 disables the history)."
         }
       }
     }
@@ -87,7 +212,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.3.3",
-    "@types/vscode": "^1.109.0",
+    "@types/vscode": "1.108.1",
     "typescript": "^5.9.3"
   }
 }
