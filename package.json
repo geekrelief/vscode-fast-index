@@ -3,7 +3,7 @@
   "displayName": "Fast Project Indexer ",
   "description": "Lightning-fast text search for VS Code using a background inverted trigram index.",
   "publisher": "eric",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "engines": {
     "vscode": "^1.108.0"
   },
@@ -48,6 +48,10 @@
         {
           "id": "fast-index.results",
           "name": "Results"
+        },
+        {
+          "id": "fast-index.pins",
+          "name": "Pinned Searches"
         }
       ]
     },
@@ -97,6 +101,16 @@
         "icon": "$(replace)"
       },
       {
+        "command": "vscode-fast-index.applyPin",
+        "title": "Restore Pinned Search",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "vscode-fast-index.removePin",
+        "title": "Remove Pinned Search",
+        "icon": "$(trash)"
+      },
+      {
         "command": "vscode-fast-index.openPanel",
         "title": "Fast Index: Open Search Panel",
         "icon": "$(zap)"
@@ -113,6 +127,16 @@
           "command": "vscode-fast-index.openMatch",
           "when": "view == fast-index.results && viewItem == match",
           "group": "navigation@1"
+        },
+        {
+          "command": "vscode-fast-index.applyPin",
+          "when": "view == fast-index.pins && viewItem == pin",
+          "group": "navigation@1"
+        },
+        {
+          "command": "vscode-fast-index.removePin",
+          "when": "view == fast-index.pins && viewItem == pin",
+          "group": "1_modification@1"
         }
       ],
       "editor/title": [

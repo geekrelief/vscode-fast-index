@@ -3,6 +3,7 @@ import { ProjectIndexer } from './indexer';
 import { SidebarProvider } from './SidebarProvider';
 import { ResultsView } from './resultsView';
 import { ResultRow, ResultsTreeProvider } from './resultsTree';
+import { PinnedSearch, PinsTreeProvider } from './pinsTree';
 import { setLogChannel, log } from './log';
 
 /** Remembers that this workspace was indexed successfully, independent of the cache files. */
@@ -57,6 +58,24 @@ export async function activate(context: vscode.ExtensionContext) {
         treeDataProvider: resultsTree,
         showCollapseAll: true
     });
+
+    // Pinned searches are their own collapsible section, so they cannot overlap the results.
+    const pinsTree = new PinsTreeProvider();
+    const pinsTreeView = vscode.window.createTreeView('fast-index.pins', {
+        treeDataProvider: pinsTree
+    });
+    pinsTree.setPins(sidebarProvider.getPinned());
+    sidebarProvider.onPins = (pins) => pinsTree.setPins(pins);
+    context.subscriptions.push(
+        pinsTreeView,
+        { dispose: () => pinsTree.dispose() },
+        vscode.commands.registerCommand('vscode-fast-index.applyPin', (pin: PinnedSearch) => {
+            if (pin) sidebarProvider.applyPin(pin);
+        }),
+        vscode.commands.registerCommand('vscode-fast-index.removePin', async (pin: PinnedSearch) => {
+            if (pin) await sidebarProvider.removePin(pin.id);
+        })
+    );
 
     // The results tab mirrors the sidebar: it re-renders on every new search.
     const resultsView = new ResultsView(

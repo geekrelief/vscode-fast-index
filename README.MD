@@ -14,7 +14,7 @@ Instead of searching text "on the fly" for every query, the plugin builds an inv
 * **Balanced results:** at most `fastIndex.maxResultsPerFile` matching lines per file (default 3, 0 = unlimited) and a fair share of the result list per workspace folder, so one huge engine file can no longer hide your own project's hits.
 * **Title-bar buttons:** the 🔒/🔓 lock, ⚙️ settings and ☰ menu sit in the view's title bar next to the name, like the built-in Search view. The 🔒 **lock** freezes the search — clicking or moving the cursor in the editor no longer refills the query, so results stay put while you read code; the state survives reloads (a **🔒 Locked** badge in the results toolbar shows when a lock is in force). The ☰ menu offers pinned-search show/hide, the results editor and the search log.
 * **⚡ editor title button:** every editor shows the same zap icon as the view container; clicking it brings the Fast Index panel forward. That is what gets you back to the panel after the container has been moved to the **Secondary Side Bar**, where the Activity Bar icon is gone.
-* **Pinned searches:** the 📌 button saves the current search — term, `Aa`/`.*`, `Only in`, `Skip`, the results filter and your collapsed tree branches. Pins live in a scrollable, resizable box anchored at the bottom of the panel (drag its top edge to resize, or hide it from the ☰ menu); each shows the main term with its extra parameters (scope, filter, `Aa`/`.*`) in muted text beneath, so pins with the same term stay distinguishable. Click one to restore the whole state, or use its ✕ to remove it. Kept per workspace and across sessions by `fastIndex.persistPinnedSearches` (default on; turn it off — or untick it in the panel settings — to keep pins for the session only).
+* **Pinned searches:** the 📌 button saves the current search — term, `Aa`/`.*`, `Only in`, `Skip`, the results filter and your collapsed tree branches. Pins live in their own collapsible **Pinned Searches** section in the Fast Index container, so they can never overlap the results; each row shows the term with its parameters (`only: h · Aa`) in the description. Click one to restore the whole state, or right-click for **Remove Pinned Search**. Kept per workspace and across sessions by `fastIndex.persistPinnedSearches` (default on; turn it off — or untick it in the panel settings — to keep pins for the session only).
 * **Search log:** the ☰ menu's *Show the search log* opens a **Fast Index** output panel that records every search with its trigger (typing, pin, filter, scope, prefill…), its scope/filter and the result counts, plus prefills that were ignored and why, and searches superseded by a newer one. Use it when results change unexpectedly.
 * **Latest search wins:** starting a search cancels the one in flight; stale results are discarded instead of overwriting the newer list.
 * **Search scope:** Two boxes under the search input narrow any query without reindexing. `Only in` and `Skip` accept comma-separated tokens that match **partially**: an extension (`cpp`, `cp`, `h`), a file or folder fragment (`Char`, `Game`, `Source/Game`), or an exact suffix (`.h`, `*.ini`). Examples: only C++ sources → `cpp`; headers → `h` or `.h`; only Python → `py`; one directory → `Source/Game`; skip build output → `Intermediate, Test`.
@@ -82,7 +82,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog
 
-### 0.8.0 → 0.15.0 — native results tree, results editor, prefill and settings fixes
+### 0.8.0 → 0.16.0 — native results tree, pinned section, results editor, prefill and settings fixes
 
 #### Results tab in the editor
 
@@ -130,7 +130,9 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 * **The results are a native tree view now.** They moved out of the webview into a contributed `TreeView` (`fast-index.results`), so VS Code owns expansion, keyboard navigation, find, icons, **Collapse All** and **sticky scroll** (`workbench.tree.enableStickyScroll`, applied by `workbenchTreeDataPreamble` to every workbench tree, extension-contributed ones included). Sticky rows are real tree rows, so a pinned folder collapses when clicked, and a deep path is compressed by `CompressibleStickyScrollDelegate` exactly as in the Explorer.
 * **Replace moved to the context menu.** The per-row inline Replace button is gone; right-clicking a match offers **Replace This Match…**, which prompts for the replacement (prefilled with the last value used) and then refreshes the tree and the results editor.
-* The webview still owns the search box, filter, scope fields, pinned searches and settings; its results area is no longer rendered.
+* The webview still owns the search box, filter, scope fields and settings; its results area is no longer rendered.
+* **Pinned Searches is its own collapsible section** (`fast-index.pins`), so pins can no longer overlap the results. Click a pin to restore it; right-click to **Remove Pinned Search**.
+* **Hover jumping is not possible on a native tree.** `TreeView` exposes only expand/collapse/selection/visibility/checkbox events — there is no hover event — so the old "rest the pointer to scroll the results editor" behaviour cannot be attached to tree rows. Instead **selecting** a match (click or arrow keys) scrolls and selects that line in the results editor, which is the closest native equivalent.
 * File names are **bold** in both the tree and the flat list; directory nodes are semi-bold (600) so the two levels stay distinguishable.
 * New **`fastIndex.showContextLine`** toggle to hide the matched line under each result for a compact file-and-line list.
 

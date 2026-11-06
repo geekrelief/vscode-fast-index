@@ -187,6 +187,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     /** Set by the extension so resting on a result can scroll the results tab. */
     public onHover?: (file: string, line: number) => void;
 
+    /** Set by the extension so the pins view mirrors the stored pins. */
+    public onPins?: (pins: PinnedSearch[]) => void;
+
     /** Set by the extension so the results tab can re-render with the panel. */
     public onResults?: (snapshot: { query: string; isRegex: boolean; isMatchCase: boolean; filter: string; include: string[]; exclude: string[]; rows: any[] }, reason: 'search' | 'layout') => void;
 
@@ -257,9 +260,30 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     private async persistPinned(): Promise<void> {
+        this.onPins?.(this.getPinned());
         const saves = vscode.workspace.getConfiguration('fastIndex').get<boolean>('persistPinnedSearches') !== false;
         if (!saves || !this.memento) return;
         await this.memento.update(PINNED_KEY, this.pinned);
+    }
+
+    /** The stored pins, for the Pinned Searches view. */
+    public getPinned(): PinnedSearch[] {
+        return this.pinned.slice();
+    }
+
+    /** Restores a pin from the Pinned Searches view: the webview owns the state it sets. */
+    public applyPin(pin: PinnedSearch): void {
+        try { this._view?.show?.(true); } catch { /* host without show() */ }
+        this._view?.webview.postMessage({ type: 'applyPin', value: pin });
+    }
+
+    /** Removes a pin from the Pinned Searches view. */
+    public async removePin(id: string): Promise<void> {
+        const before = this.pinned.length;
+        this.pinned = this.pinned.filter(entry => entry.id !== id);
+        if (this.pinned.length === before) return;
+        await this.persistPinned();
+        this._view?.webview.postMessage({ type: 'pinnedList', value: this.pinned });
     }
 
     public resolveWebviewView(webviewView: vscode.WebviewView) {
@@ -1958,10 +1982,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 
                     function applyPinnedLayout() {
-                        const show = pinnedVisible && pinnedSearches.length > 0;
-                        pinnedSection.style.display = show ? 'flex' : 'none';
-                        pinnedSection.style.height = pinnedHeight + 'px';
-                        pinnedResizer.style.display = show ? 'block' : 'none';
+                        // Pinned searches live in their own tree view section now.
+                        pinnedSection.style.display = 'none';
+                        pinnedResizer.style.display = 'none';
                     }
 
                     function rememberLayout() {
@@ -2204,6 +2227,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         if (message.type === 'pinnedList') {
                             pinnedSearches = Array.isArray(message.value) ? message.value : [];
                             renderPinned();
+                        }
+
+                        if (message.type === 'applyPin') {
+                            restorePinned(message.value || {});
                         }
 
                         if (message.type === 'cacheList') {
