@@ -77,7 +77,7 @@ The preview surfaces share `src/theme.ts`, which resolves `workbench.colorTheme`
 
 ## Changelog — current development session
 
-Everything below landed in one session (0.3.6 → 0.8.0).
+Everything below landed in one session (0.3.6 → 0.9.0).
 
 ### Search UI
 
@@ -105,11 +105,13 @@ Everything below landed in one session (0.3.6 → 0.8.0).
 
 ### Results in the editor
 
-* **Fast Index: Open Results in Editor** renders the results into a **virtual document** (`fast-index-results:` scheme) in a real editor tab, so it inherits the normal editor theme, font, find widget and folding.
-* The tab is **driven by the panel**: one stable tab is rewritten in place on every new search (including replacements and Tree/List switches), so the query, filters and context lines are always the panel's current ones — there are no controls inside the document.
-* Result lines are **syntax coloured from the active theme's own `tokenColors`** (the same extractor the preview panel uses) by a small per-language lexer covering C/C++/C#/Python/JS/TS: keywords, types, calls, strings, numbers, comments and preprocessor directives.
-* The matched text and its line are highlighted with the editor's find colours (`editor.findMatchHighlightBackground`, `editor.findMatchBorder`), so the highlight follows the theme too.
-* Every match line is a **document link**: hovering shows *Follow link (Ctrl+Click)*, and following it — or simply **clicking the line** — opens a **peek** of the source location rather than another tab.
+* **Fast Index: Open Results in Editor** writes the results into a virtual document in **the exact format VS Code's own search editor uses**: `# Query:` / `# Flags:` / `# ContextLines:` directives, one `path/to/file.cpp:` block per file, `  12: code` for a match and `  12  code` for context.
+* The document is labelled with the built-in **`search-result` language**, so VS Code's own `search-result` extension supplies everything else instead of this one re-implementing it:
+  * its generated TextMate grammar opens a `meta.resultBlock` on each `file.ext:` line and *embeds that file's grammar* (`source.cpp`, `source.python`, `source.cs`, …) — so highlighting is done by the language extensions you have installed, not by a custom lexer;
+  * its `DefinitionProvider` and `DocumentLinkProvider` turn paths and result lines into **Follow-link** targets;
+  * its context/match line decorations give the familiar dimmed-context, bold-match look.
+* A single click on a file or result line runs `editor.action.peekDefinition`, so the **peek opens inside the results tab** — it no longer jumps to the file and opens a peek there. The peek body is a real editor for the target file, so language-server features work in it.
+* The panel still owns everything: one stable tab is rewritten in place on every new search (including replacements and Tree/List switches), so query, filters and context lines are always the panel's current ones — there are no controls inside the document.
 
 ### Follow-editor / prefill
 
@@ -130,5 +132,5 @@ Everything below landed in one session (0.3.6 → 0.8.0).
 
 ### Internal
 
-* Split out `src/theme.ts` (theme token-colour resolution), `src/PreviewProvider.ts` (bottom-panel preview), `src/ResultsDocumentProvider.ts` (results document model, depth-first ordering, links), `src/resultsView.ts` (results tab lifecycle, click-to-peek, panel-driven refresh), `src/syntax.ts` (per-language tokenizer + theme-coloured decorations) and `src/log.ts` (output channel).
+* Split out `src/theme.ts` (theme token-colour resolution), `src/PreviewProvider.ts` (bottom-panel preview), `src/ResultsDocumentProvider.ts` (search-editor-format serialisation, depth-first ordering), `src/resultsView.ts` (results tab lifecycle, click-to-peek, panel-driven refresh) and `src/log.ts` (output channel).
 * Pinned searches, lock state and layout stored through the webview/host state as appropriate.

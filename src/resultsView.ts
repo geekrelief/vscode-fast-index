@@ -1,30 +1,30 @@
 import * as vscode from 'vscode';
 import {
     ResultRow,
-    ResultsDocument,
     ResultsDocumentProvider,
-    ResultsLinkProvider,
     ResultsSnapshot,
-    buildResultsDocument,
+    buildResultsText,
+    FILE_LINE,
+    RESULT_LINE,
+    labelForFile,
     orderRowsDepthFirst
 } from './ResultsDocumentProvider';
-import { ResultsDecorator } from './syntax';
 
-const PEEK_COMMAND = ResultsLinkProvider.peekCommand;
+/** The language VS Code's own `search-result` extension owns. */
+const SEARCH_RESULT_LANGUAGE = 'search-result';
 
 /**
- * The results tab: a read-only editor that mirrors whatever the sidebar is
- * currently showing. The sidebar owns the query and the filters, so the tab is
- * refreshed in place instead of being rebuilt from a stale snapshot.
+ * The results tab: a read-only `search-result` document that the panel rewrites
+ * in place. VS Code's built-in search-result extension supplies the tokenizer,
+ * the definition links and the Follow-link targets; this class only builds the
+ * text and turns a click into a peek in this editor.
  */
 export class ResultsView implements vscode.Disposable {
     private readonly provider = new ResultsDocumentProvider();
-    private readonly decorator = new ResultsDecorator();
     private readonly disposables: vscode.Disposable[] = [];
     private building = false;
     private rebuildQueued = false;
-    private decorateTimer?: ReturnType<typeof setTimeout>;
-    private lastPeek?: { key: string; at: number };
+    private lastPeek?: { line: number; version: number; at: number };
 
     public constructor(
         private readonly getSnapshot: () => ResultsSnapshot | undefined,
@@ -35,28 +35,12 @@ export class ResultsView implements vscode.Disposable {
         this.disposables.push(
             this.provider,
             vscode.workspace.registerTextDocumentContentProvider(ResultsDocumentProvider.scheme, this.provider),
-            vscode.languages.registerDocumentLinkProvider(
-                { scheme: ResultsDocumentProvider.scheme },
-                new ResultsLinkProvider(() => this.provider.current())
-            ),
-            vscode.commands.registerCommand(PEEK_COMMAND, (file: string, line: number) => this.peek(file, line)),
             vscode.commands.registerCommand('vscode-fast-index.openResultsInEditor', () => this.open()),
-            vscode.window.onDidChangeTextEditorSelection(event => this.onSelection(event)),
-            vscode.window.onDidChangeActiveTextEditor(editor => this.decorateEditor(editor)),
-            vscode.workspace.onDidChangeTextDocument(event => {
-                if (event.document.uri.scheme === ResultsDocumentProvider.scheme) this.scheduleDecorate();
-            }),
-            vscode.workspace.onDidChangeConfiguration(event => {
-                if (!event.affectsConfiguration('workbench.colorTheme')) return;
-                this.decorator.applyTheme();
-                this.scheduleDecorate(50);
-            }),
-            { dispose: () => this.decorator.dispose() }
+            vscode.window.onDidChangeTextEditorSelection(event => this.onSelection(event))
         );
         return this.disposables;
     }
 
-    /** True once the results tab has been opened at least once this session. */
     private isOpen(): boolean {
         const target = ResultsDocumentProvider.uri.toString();
         return vscode.workspace.textDocuments.some(document => document.uri.toString() === target);
@@ -70,19 +54,14 @@ export class ResultsView implements vscode.Disposable {
             return;
         }
 
-        const model = await this.build(snapshot);
-        this.provider.setResults(model);
+        this.provider.setText(await this.render(snapshot));
 
         const document = await vscode.workspace.openTextDocument(ResultsDocumentProvider.uri);
-        const editor = await vscode.window.showTextDocument(document, { preview: false });
-        this.decorator.decorate(editor, model);
-        this.revealFirstMatch(editor, model);
+        await this.ensureLanguage(document);
+        await vscode.window.showTextDocument(document, { preview: false });
     }
 
-    /**
-     * Called whenever the sidebar produces new results. Only an open tab is
-     * rebuilt; an unopened one is built on demand by `open`.
-     */
+    /** Called whenever the panel produces new results or changes its layout. */
     public async refresh(): Promise<void> {
         if (!this.isOpen()) return;
         if (this.building) {
@@ -95,9 +74,7 @@ export class ResultsView implements vscode.Disposable {
 
         this.building = true;
         try {
-            const model = await this.build(snapshot);
-            this.provider.setResults(model);
-            this.scheduleDecorate(0);
+            this.provider.setText(await this.render(snapshot));
         } catch {
             /* a failed rebuild leaves the previous content in place */
         } finally {
@@ -109,10 +86,20 @@ export class ResultsView implements vscode.Disposable {
         }
     }
 
-    private async build(snapshot: ResultsSnapshot): Promise<ResultsDocument> {
+    private async ensureLanguage(document: vscode.TextDocument): Promise<void> {
+        if (document.languageId === SEARCH_RESULT_LANGUAGE) return;
+        try {
+            await vscode.languages.setTextDocumentLanguage(document, SEARCH_RESULT_LANGUAGE);
+        } catch {
+            /* keep whatever language the host picked */
+        }
+    }
+
+    private async render(snapshot: ResultsSnapshot): Promise<string> {
         const configured = vscode.workspace.getConfiguration('fastIndex').get<number>('previewContextLines');
         const radius = Math.max(0, Math.min(50, Math.round(typeof configured === 'number' ? configured : 2)));
 
+        const rows = this.groupRows(snapshot.rows as ResultRow[]);
         const cache = new Map<string, string[]>();
         const readSource = async (file: string): Promise<string[]> => {
             const cached = cache.get(file);
@@ -130,97 +117,51 @@ export class ResultsView implements vscode.Disposable {
             return lines;
         };
 
-        return buildResultsDocument(
-            snapshot,
-            snapshot.rows as ResultRow[],
-            radius,
-            this.getViewMode() === 'tree',
-            orderRowsDepthFirst,
-            readSource
-        );
+        return buildResultsText(snapshot, rows, radius, readSource);
     }
 
-    private scheduleDecorate(delay = 0): void {
-        if (this.decorateTimer) clearTimeout(this.decorateTimer);
-        this.decorateTimer = setTimeout(() => {
-            this.decorateTimer = undefined;
-            for (const editor of vscode.window.visibleTextEditors) this.decorateEditor(editor);
-        }, delay);
-    }
+    /** One contiguous block per file; tree mode also sorts the blocks like the sidebar. */
+    private groupRows(rows: ResultRow[]): ResultRow[] {
+        if (this.getViewMode() === 'tree') return orderRowsDepthFirst(rows);
 
-    private decorateEditor(editor: vscode.TextEditor | undefined): void {
-        if (!editor) return;
-        if (editor.document.uri.scheme !== ResultsDocumentProvider.scheme) return;
-        const model = this.provider.current();
-        if (!model) return;
-        this.decorator.decorate(editor, model);
-    }
+        const groups = new Map<string, ResultRow[]>();
+        for (const row of rows) {
+            const key = labelForFile(row.file);
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key)!.push(row);
+        }
 
-    /** Puts the caret on the first hit so the tab opens ready to work. */
-    private revealFirstMatch(editor: vscode.TextEditor, model: ResultsDocument): void {
-        const index = model.lines.findIndex(info => info && info.match);
-        if (index < 0) return;
-        const info = model.lines[index]!;
-        const position = new vscode.Position(index, info.offset);
-        editor.selection = new vscode.Selection(position, position);
-        editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+        const ordered: ResultRow[] = [];
+        for (const group of groups.values()) ordered.push(...group);
+        return ordered;
     }
 
     /**
-     * A plain click on a hit opens a peek at the source line, the way the native
-     * search editor does; Ctrl+Click on the same line follows the document link.
+     * A single click on a file or result line peeks into this editor, which is
+     * exactly what the search editor does (`singleClickBehaviour: peekDefinition`).
+     * The peek itself is a real editor, so it gets the real language support.
      */
     private onSelection(event: vscode.TextEditorSelectionChangeEvent): void {
-        if (event.textEditor.document.uri.scheme !== ResultsDocumentProvider.scheme) return;
-        if (event.kind !== vscode.TextEditorSelectionChangeKind.Mouse) return;
-        if (event.selections.length !== 1 || !event.selections[0].isEmpty) return;
+        const { textEditor, selections, kind } = event;
+        if (textEditor.document.uri.scheme !== ResultsDocumentProvider.scheme) return;
+        if (kind !== vscode.TextEditorSelectionChangeKind.Mouse) return;
+        if (selections.length !== 1 || !selections[0].isEmpty) return;
 
-        const line = event.selections[0].active.line;
-        const info = this.provider.lineAt(event.textEditor.document.uri, line);
-        if (!info || !info.match) return;
+        const line = selections[0].active.line;
+        if (line >= textEditor.document.lineCount) return;
+        const text = textEditor.document.lineAt(line).text;
+        if (!FILE_LINE.test(text) && !RESULT_LINE.test(text)) return;
 
-        const key = info.file + ':' + info.line;
+        // A double click delivers two selection changes; peek once.
         const now = Date.now();
-        if (this.lastPeek && this.lastPeek.key === key && now - this.lastPeek.at < 400) return;
-        this.lastPeek = { key, at: now };
+        if (this.lastPeek && this.lastPeek.line === line &&
+            this.lastPeek.version === textEditor.document.version && now - this.lastPeek.at < 400) return;
+        this.lastPeek = { line, version: textEditor.document.version, at: now };
 
-        void this.peek(info.file, info.line);
-    }
-
-    private async peek(file: string, line: number): Promise<void> {
-        if (!file) return;
-        let uri: vscode.Uri;
-        try {
-            uri = vscode.Uri.file(file);
-        } catch {
-            return;
-        }
-
-        const position = new vscode.Position(Math.max(0, Number(line) || 0), 0);
-        const location = new vscode.Location(uri, position);
-
-        // Peek first; fall back to a normal open when the host has no peek widget.
-        for (const command of ['editor.action.peekLocations', 'editor.action.showReferences']) {
-            try {
-                await vscode.commands.executeCommand(command, uri, position, [location], 'peek');
-                return;
-            } catch {
-                /* try the next strategy */
-            }
-        }
-
-        try {
-            const document = await vscode.workspace.openTextDocument(uri);
-            const editor = await vscode.window.showTextDocument(document, { preview: true });
-            editor.selection = new vscode.Selection(position, position);
-            editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
-        } catch {
-            vscode.window.showInformationMessage('Fast Index: could not open ' + file);
-        }
+        void vscode.commands.executeCommand('editor.action.peekDefinition');
     }
 
     public dispose(): void {
-        if (this.decorateTimer) clearTimeout(this.decorateTimer);
         this.disposables.forEach(disposable => disposable.dispose());
         this.disposables.length = 0;
     }
