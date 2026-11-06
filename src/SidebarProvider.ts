@@ -979,6 +979,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     .reindex-text { flex: 1; }
                     .link-btn { background: transparent; border: none; padding: 0; cursor: pointer; color: var(--vscode-textLink-foreground); font-size: 1em; text-decoration: underline; }
                     .link-btn:hover { color: var(--vscode-textLink-activeForeground); }
+                    .sticky-path { position: sticky; top: 0; z-index: 6; margin: 0 0 2px 0; padding: 2px 8px; font-size: 0.78em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: var(--vscode-sideBar-background, var(--vscode-editor-background)); color: var(--vscode-descriptionForeground); border-bottom: 1px solid var(--vscode-widget-border); }
                     .results-count { margin-left: auto; font-size: 0.8em; opacity: 0.7; }
                     .subsearch input { width: 100%; padding: 4px 6px; margin-bottom: 6px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); box-sizing: border-box; font-size: 0.85em; }
                     .subsearch input:focus { border-color: var(--vscode-focusBorder); outline: none; }
@@ -1156,6 +1157,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const searchInput = document.getElementById('searchInput');
                     const replaceInput = document.getElementById('replaceInput');
                     const resultsDiv = document.getElementById('results');
+                    // Sticky breadcrumb: the path of the topmost visible row, pinned while scrolling.
+                    const stickyPath = document.createElement('div');
+                    stickyPath.className = 'sticky-path';
+                    stickyPath.style.visibility = 'hidden';
                     const toggleReplaceBtn = document.getElementById('toggleReplaceBtn');
                     const replaceGroup = document.getElementById('replaceGroup');
                     const replaceActions = document.getElementById('replaceActions');
@@ -1831,6 +1836,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
                             const row = document.createElement('div');
                             row.className = 'tree-dir';
+                            row.dataset.path = path;
                             row.style.paddingLeft = (4 + depth * 12) + 'px';
                             row.innerHTML = '<span class="chevron">' + (isCollapsed ? '▸' : '▾') + '</span>' +
                                 '<span class="dir-name">' + escapeHtml(name) + '</span>' +
@@ -1872,6 +1878,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
                             const row = document.createElement('div');
                             row.className = 'tree-file';
+                            row.dataset.path = filePath;
                             row.style.paddingLeft = (4 + depth * 12) + 'px';
                             row.innerHTML = '<span class="chevron">' + (isCollapsed ? '▸' : '▾') + '</span>' +
                                 '<span class="dir-name">' + escapeHtml(name) + '</span>' +
@@ -1885,7 +1892,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             container.appendChild(row);
 
                             if (!isCollapsed) {
-                                group.forEach(item => container.appendChild(makeResultRow(item, depth + 1, '')));
+                                group.forEach(item => {
+                                    const row = makeResultRow(item, depth + 1, '');
+                                    row.dataset.path = filePath;
+                                    container.appendChild(row);
+                                });
                             }
                         });
                     }
@@ -1903,6 +1914,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             : items.length + ' of ' + currentResults.length;
 
                         resultsDiv.innerHTML = '';
+                        stickyPath.style.visibility = 'hidden';
+                        stickyPath.textContent = '';
                         if (!hasResults) {
                             resultsDiv.innerHTML = statusState === 'busy' || statusState === 'idle'
                                 ? '<p class="loading-hint" style="opacity: 0.6; font-size: 0.9em;">Index is still loading…</p>'
@@ -1914,12 +1927,51 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             return;
                         }
 
+                        resultsDiv.appendChild(stickyPath);
                         if (viewMode === 'tree') {
                             renderTree(buildTree(items), '', 0, resultsDiv);
                         } else {
-                            items.forEach(item => resultsDiv.appendChild(makeResultRow(item, 0, item.fileName)));
+                            items.forEach(item => {
+                                const row = makeResultRow(item, 0, item.fileName);
+                                row.dataset.path = item.fileName;
+                                resultsDiv.appendChild(row);
+                            });
                         }
+                        scheduleStickyUpdate();
                     }
+
+                    // Pins the path of the topmost visible row while the results scroll.
+                    let stickyFrame = 0;
+
+                    function updateStickyPath() {
+                        stickyFrame = 0;
+                        if (!stickyPath.parentNode || resultsDiv.scrollTop < 4) {
+                            stickyPath.style.visibility = 'hidden';
+                            return;
+                        }
+                        const rows = resultsDiv.querySelectorAll('[data-path]');
+                        const top = resultsDiv.getBoundingClientRect().top + 1;
+                        let current = '';
+                        for (let index = 0; index < rows.length; index++) {
+                            if (rows[index].getBoundingClientRect().bottom > top) {
+                                current = rows[index].dataset.path || '';
+                                break;
+                            }
+                        }
+                        if (!current) {
+                            stickyPath.style.visibility = 'hidden';
+                            return;
+                        }
+                        stickyPath.textContent = current;
+                        stickyPath.style.visibility = 'visible';
+                    }
+
+                    function scheduleStickyUpdate() {
+                        if (stickyFrame) cancelAnimationFrame(stickyFrame);
+                        stickyFrame = requestAnimationFrame(updateStickyPath);
+                    }
+
+                    resultsDiv.addEventListener('scroll', scheduleStickyUpdate, { passive: true });
 
                     viewToggleBtn.addEventListener('click', () => {
                         viewMode = viewMode === 'tree' ? 'flat' : 'tree';

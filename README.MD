@@ -19,7 +19,7 @@ Instead of searching text "on the fly" for every query, the plugin builds an inv
 * **Latest search wins:** starting a search cancels the one in flight; stale results are discarded instead of overwriting the newer list.
 * **Search scope:** Two boxes under the search input narrow any query without reindexing. `Only in` and `Skip` accept comma-separated tokens that match **partially**: an extension (`cpp`, `cp`, `h`), a file or folder fragment (`Char`, `Game`, `Source/Game`), or an exact suffix (`.h`, `*.ini`). Examples: only C++ sources → `cpp`; headers → `h` or `.h`; only Python → `py`; one directory → `Source/Game`; skip build output → `Intermediate, Test`.
 * **Filename matches first:** Files whose *name* matches the query are listed above content-only matches — exact name matches first, then prefix matches, then partial ones, then path-qualified queries (`GameFramework/Character.h`). A file whose name matches but whose content never mentions the query is still listed, marked `file name match`.
-* **Tree view:** Results can be shown as a directory tree grouped by path and then by **file** — matches in the same file sit under one file node with their line numbers, so a file with many hits collapses to a single row. Expanded all the way down by default. Every directory and file node expands/collapses on click; expanding a directory walks straight down single-child chains and leaves the children of branching folders as they were, and **Expand all** / **Collapse all** work on the whole tree; right-clicking a directory offers **Collapse all below** / **Expand all below** for that branch — **Collapse all below** leaves the node itself open and folds only its contents, while **Expand all below** unfolds it completely. **☰ List** switches back to a flat list.
+* **Tree view:** Results can be shown as a directory tree grouped by path and then by **file** — matches in the same file sit under one file node with their line numbers, so a file with many hits collapses to a single row. Expanded all the way down by default. Every directory and file node expands/collapses on click; expanding a directory walks straight down single-child chains and leaves the children of branching folders as they were, and **Expand all** / **Collapse all** work on the whole tree; right-clicking a directory offers **Collapse all below** / **Expand all below** for that branch — **Collapse all below** leaves the node itself open and folds only its contents, while **Expand all below** unfolds it completely. **☰ List** switches back to a flat list. A **sticky breadcrumb** keeps the enclosing path pinned to the top of the list while you scroll, so a deep subtree never loses its context.
 * **Filter results:** The box directly under the search field is a boolean modifier of the search — a row must match both the query and the filter (by file name or line text). It survives new searches, `Only in` / `Skip` edits and result refreshes, and clearing it re-runs the query. Every text field shows a ✕ on hover to clear it.
 * **Trigram Indexing:** Searches not just by whole words, but by word parts (e.g., `calc` will find `calculateTotalPrice`).
 * **Find & Replace:** Easily replace text across multiple files or one-by-one with an intuitive UI. Supports multiline code snippets and safe replacements via VS Code's `WorkspaceEdit` (Ctrl+Z to undo).
@@ -82,7 +82,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog
 
-### 0.8.0 → 0.13.3 — results editor, preview removal, prefill and settings fixes
+### 0.8.0 → 0.14.0 — results editor, preview removal, prefill and settings fixes
 
 #### Results tab in the editor
 
@@ -125,6 +125,12 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 * File names are bold in both the tree and the flat list, while directory nodes are semi-bold (600) so the two levels stay distinguishable.
 * New **`fastIndex.autoSearchFromResults`** (default off): whether selecting a line in the results editor may fill the search box. The webview now also receives all settings when it becomes ready, so `hoverJumpDelay` (and the rest) apply immediately instead of waiting for the settings panel to be opened.
 * All of them relabelled in the panel's ⚙️ settings.
+
+#### Panel results
+
+* **Sticky breadcrumb:** the enclosing path (`src/Game/Character.cpp`) is pinned to the top of the results list while it scrolls, following the topmost visible row. It hides at the very top of the list, so it never duplicates the row directly beneath it.
+* File names are **bold** in both the tree and the flat list; directory nodes are semi-bold (600) so the two levels stay distinguishable.
+* New **`fastIndex.showContextLine`** toggle to hide the matched line under each result for a compact file-and-line list.
 
 #### Panel access
 
