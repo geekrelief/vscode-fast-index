@@ -916,12 +916,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     button:disabled { opacity: 0.5; cursor: not-allowed; }
                     
                     .settings-panel { display: none; flex-direction: column; gap: 8px; margin-bottom: 15px; padding: 10px; background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-widget-border); border-radius: 4px; }
+                    .settings-group { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 10px; border: 1px solid var(--vscode-widget-border); border-radius: 6px; }
+                    .settings-group-title { margin: 0; font-size: 0.8em; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.75; }
+                    .settings-group-note { margin: 0; font-size: 0.78em; opacity: 0.65; }
                     .setting-item { display: flex; flex-direction: column; gap: 3px; }
                     .setting-item label { font-size: 0.85em; font-weight: bold; opacity: 0.9; }
                     .setting-item input { padding: 5px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); }
                     .setting-item input:focus { border-color: var(--vscode-focusBorder); }
                     
-                    .cache-section { border-top: 1px solid var(--vscode-widget-border); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+                    .cache-section { display: flex; flex-direction: column; gap: 6px; }
                     .cache-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 0.8em; }
                     .cache-head label { display: flex; align-items: center; gap: 4px; cursor: pointer; font-weight: bold; opacity: 0.9; }
                     .cache-summary { opacity: 0.75; font-variant-numeric: tabular-nums; }
@@ -1021,62 +1024,72 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 </div>
                 
                 <div class="settings-panel" id="settingsPanel">
-                    <div class="setting-item">
-                        <label>Include Extensions (e.g., ts,js,md)</label>
-                        <input type="text" id="confIncludeExt" placeholder="Leave empty for all" />
-                    </div>
-                    <div class="setting-item">
-                        <label>Exclude Patterns (Glob)</label>
-                        <input type="text" id="confExcludePat" placeholder="{**/node_modules/**,...}" />
-                    </div>
-                    <div class="setting-item">
-                        <label>Max File Size (KB)</label>
-                        <input type="number" id="confMaxFileSize" />
-                    </div>
-                    <div class="setting-item">
-                        <label>Max Search Results</label>
-                        <input type="number" id="confMaxResults" />
-                    </div>
-                    <div class="setting-item">
-                        <label>Recent Searches Remembered (0 = off)</label>
-                        <input type="number" id="confMaxRecent" min="0" max="100" />
-                    </div>
-                    <div class="setting-item setting-check">
-                        <label><input type="checkbox" id="confFollowEditor" /> Follow editor selection / word under cursor</label>
-                    </div>
-                    <div class="setting-item setting-check">
-                        <label><input type="checkbox" id="confPersistPinned" /> Keep pinned searches between sessions</label>
-                    </div>
-                    <div class="setting-item setting-check">
-                        <label><input type="checkbox" id="confAutoOpenResults" /> Open the results editor automatically when a search finds matches</label>
-                    </div>
-                    <div class="setting-item">
-                        <label>Hover Jump Delay (ms, 0 = instant)</label>
-                        <input type="number" id="confHoverDelay" min="0" step="50" />
-                    </div>
-                    <div class="setting-item">
-                        <label>Results Context Lines (above and below)</label>
-                        <input type="number" id="confContextLines" min="0" max="50" step="1" />
-                    </div>
-                    <div class="cache-section">
-                        <div class="cache-head">
-                            <label title="Select every cached folder"><input type="checkbox" id="cacheSelectAll" /> Select all</label>
-                            <span class="cache-summary" id="cacheSummary">Loading…</span>
+                    <section class="settings-group">
+                        <h3 class="settings-group-title">Indexing</h3>
+                        <p class="settings-group-note">These shape the index itself. Changing them makes the existing index stale until you reindex.</p>
+                        <div class="setting-item">
+                            <label>Include Extensions (e.g., ts,js,md)</label>
+                            <input type="text" id="confIncludeExt" placeholder="Leave empty for all" />
                         </div>
-                        <div class="cache-list" id="cacheList"></div>
-                        <div class="cache-actions">
-                            <button id="reindexCachesBtn" disabled>Reindex selected</button>
-                            <button id="deleteCachesBtn" class="danger" disabled>Delete selected</button>
-                            <button id="deleteStaleBtn" class="danger" disabled>Delete stale</button>
+                        <div class="setting-item">
+                            <label>Exclude Patterns (Glob)</label>
+                            <input type="text" id="confExcludePat" placeholder="{**/node_modules/**,...}" />
                         </div>
-                    </div>
-                    <div class="reindex-banner" id="reindexHint" style="display: none;">
-                        <span class="reindex-text" id="reindexText"></span>
-                        <button id="undoIndexBtn" class="link-btn" title="Restore the include/exclude/size settings the current index was built with">Undo changes</button>
-                    </div>
-                    <div style="display: flex; gap: 5px; margin-top: 5px;">
-                        <button id="reindexBtn" style="flex: 1;" title="Rebuild the index with the current settings.">🔁 Reindex</button>
-                    </div>
+                        <div class="setting-item">
+                            <label>Max File Size (KB)</label>
+                            <input type="number" id="confMaxFileSize" />
+                        </div>
+                        <div class="reindex-banner" id="reindexHint" style="display: none;">
+                            <span class="reindex-text" id="reindexText"></span>
+                            <button id="undoIndexBtn" class="link-btn" title="Restore the include/exclude/size settings the current index was built with">Undo changes</button>
+                        </div>
+                        <button id="reindexBtn" title="Rebuild the index with the current settings.">🔁 Reindex</button>
+                    </section>
+
+                    <section class="settings-group">
+                        <h3 class="settings-group-title">Results window</h3>
+                        <div class="setting-item">
+                            <label>Max Search Results</label>
+                            <input type="number" id="confMaxResults" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Recent Searches Remembered (0 = off)</label>
+                            <input type="number" id="confMaxRecent" min="0" max="100" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Hover Jump Delay (ms, 0 = instant)</label>
+                            <input type="number" id="confHoverDelay" min="0" step="50" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Results Context Lines (above and below)</label>
+                            <input type="number" id="confContextLines" min="0" max="50" step="1" />
+                        </div>
+                        <div class="setting-item setting-check">
+                            <label><input type="checkbox" id="confFollowEditor" /> Follow editor selection / word under cursor</label>
+                        </div>
+                        <div class="setting-item setting-check">
+                            <label><input type="checkbox" id="confPersistPinned" /> Keep pinned searches between sessions</label>
+                        </div>
+                        <div class="setting-item setting-check">
+                            <label><input type="checkbox" id="confAutoOpenResults" /> Open the results editor automatically when a search finds matches</label>
+                        </div>
+                    </section>
+
+                    <section class="settings-group">
+                        <h3 class="settings-group-title">Cached indexes</h3>
+                        <div class="cache-section">
+                            <div class="cache-head">
+                                <label title="Select every cached folder"><input type="checkbox" id="cacheSelectAll" /> Select all</label>
+                                <span class="cache-summary" id="cacheSummary">Loading…</span>
+                            </div>
+                            <div class="cache-list" id="cacheList"></div>
+                            <div class="cache-actions">
+                                <button id="reindexCachesBtn" disabled>Reindex selected</button>
+                                <button id="deleteCachesBtn" class="danger" disabled>Delete selected</button>
+                                <button id="deleteStaleBtn" class="danger" disabled>Delete stale</button>
+                            </div>
+                        </div>
+                    </section>
                 </div>
                 
                 <div class="actions">
