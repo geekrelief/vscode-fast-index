@@ -990,7 +990,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     .tree-file .chevron { opacity: 0.55; }
                     .tree-dir:hover { background: var(--vscode-list-hoverBackground); }
                     .tree-dir .chevron { width: 10px; opacity: 0.7; flex: 0 0 auto; }
-                    .tree-dir .dir-name { font-weight: bold; }
+                    .tree-dir .dir-name { font-weight: 600; }
                     .tree-dir .dir-count { opacity: 0.6; font-size: 0.9em; margin-left: 2px; }
                     .filename-only { opacity: 0.75; font-style: italic; }
                     
