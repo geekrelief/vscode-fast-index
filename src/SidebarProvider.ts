@@ -1753,7 +1753,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         return parts.join(' · ');
                     }
 
-
                     let previewTimer = null;
                     let previewHover = null;
 
