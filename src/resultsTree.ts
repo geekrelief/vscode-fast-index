@@ -79,7 +79,9 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
         const file = row ? String(row.fileName || '') : undefined;
         if (file === this.activeFile) return;
         this.activeFile = file;
-        this.emitter.fire(undefined);
+        // This is called from resolveTreeItem, and the contract forbids firing
+        // onDidChangeTreeData synchronously there, so defer it to the next tick.
+        setTimeout(() => this.emitter.fire(undefined), 0);
     }
 
     private isActive(node: DirNode | FileNode): boolean {
@@ -136,21 +138,25 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
         }
 
         if (node.kind === 'file') {
+            const active = this.isActive(node);
             const item = new vscode.TreeItem(this.labelFor(node), vscode.TreeItemCollapsibleState.Expanded);
             item.id = node.id;
             item.contextValue = 'file';
             item.description = String(node.rows.length);
             item.tooltip = node.path;
             item.resourceUri = vscode.Uri.file(node.file);
+            // The icon carries the highlight even where label emphasis is ignored.
+            if (active) item.iconPath = new vscode.ThemeIcon('file', new vscode.ThemeColor('list.highlightForeground'));
             return item;
         }
 
+        const active = this.isActive(node);
         const item = new vscode.TreeItem(this.labelFor(node), vscode.TreeItemCollapsibleState.Expanded);
         item.id = node.id;
         item.contextValue = 'dir';
         item.description = String(node.count);
         item.tooltip = node.path;
-        item.iconPath = new vscode.ThemeIcon('folder');
+        item.iconPath = new vscode.ThemeIcon(active ? 'folder-active' : 'folder');
         return item;
     }
 
