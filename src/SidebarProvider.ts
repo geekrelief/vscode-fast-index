@@ -979,8 +979,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     .reindex-text { flex: 1; }
                     .link-btn { background: transparent; border: none; padding: 0; cursor: pointer; color: var(--vscode-textLink-foreground); font-size: 1em; text-decoration: underline; }
                     .link-btn:hover { color: var(--vscode-textLink-activeForeground); }
-                    .sticky-stack { position: sticky; top: 0; height: 0; z-index: 6; }
-                    .sticky-bar { position: absolute; left: 0; right: 0; height: 20px; box-sizing: border-box; padding: 2px 8px; font-size: 0.78em; font-weight: 600; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: var(--vscode-sideBar-background, var(--vscode-editor-background)); color: var(--vscode-descriptionForeground); border-bottom: 1px solid var(--vscode-widget-border); }
                     .results-count { margin-left: auto; font-size: 0.8em; opacity: 0.7; }
                     .subsearch input { width: 100%; padding: 4px 6px; margin-bottom: 6px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); box-sizing: border-box; font-size: 0.85em; }
                     .subsearch input:focus { border-color: var(--vscode-focusBorder); outline: none; }
@@ -1158,14 +1156,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const searchInput = document.getElementById('searchInput');
                     const replaceInput = document.getElementById('replaceInput');
                     const resultsDiv = document.getElementById('results');
-                    // Sticky scroll, mirroring VS Code's tree widget: the ancestor chain of the
-                    // top visible row is pinned, one bar per level, and the last bar is pushed
-                    // up as its own subtree scrolls away.
-                    const STICKY_BAR_HEIGHT = 20;
-                    const STICKY_MAX_BARS = 6;
-                    const stickyStack = document.createElement('div');
-                    stickyStack.className = 'sticky-stack';
-                    stickyStack.style.visibility = 'hidden';
                     const toggleReplaceBtn = document.getElementById('toggleReplaceBtn');
                     const replaceGroup = document.getElementById('replaceGroup');
                     const replaceActions = document.getElementById('replaceActions');
@@ -1842,7 +1832,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             const row = document.createElement('div');
                             row.className = 'tree-dir';
                             row.dataset.path = path;
-                            row.dataset.depth = String(depth);
                             row.style.paddingLeft = (4 + depth * 12) + 'px';
                             row.innerHTML = '<span class="chevron">' + (isCollapsed ? '▸' : '▾') + '</span>' +
                                 '<span class="dir-name">' + escapeHtml(name) + '</span>' +
@@ -1885,7 +1874,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             const row = document.createElement('div');
                             row.className = 'tree-file';
                             row.dataset.path = filePath;
-                            row.dataset.depth = String(depth);
                             row.style.paddingLeft = (4 + depth * 12) + 'px';
                             row.innerHTML = '<span class="chevron">' + (isCollapsed ? '▸' : '▾') + '</span>' +
                                 '<span class="dir-name">' + escapeHtml(name) + '</span>' +
@@ -1902,7 +1890,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                                 group.forEach(item => {
                                     const row = makeResultRow(item, depth + 1, '');
                                     row.dataset.path = filePath;
-                                    row.dataset.depth = String(depth + 1);
                                     container.appendChild(row);
                                 });
                             }
@@ -1922,8 +1909,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             : items.length + ' of ' + currentResults.length;
 
                         resultsDiv.innerHTML = '';
-                        stickyStack.style.visibility = 'hidden';
-                        stickyStack.textContent = '';
                         if (!hasResults) {
                             resultsDiv.innerHTML = statusState === 'busy' || statusState === 'idle'
                                 ? '<p class="loading-hint" style="opacity: 0.6; font-size: 0.9em;">Index is still loading…</p>'
@@ -1935,156 +1920,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             return;
                         }
 
-                        resultsDiv.appendChild(stickyStack);
                         if (viewMode === 'tree') {
                             renderTree(buildTree(items), '', 0, resultsDiv);
                         } else {
                             items.forEach(item => {
                                 const row = makeResultRow(item, 0, item.fileName);
                                 row.dataset.path = item.fileName;
-                                row.dataset.depth = '0';
                                 resultsDiv.appendChild(row);
                             });
                         }
-                        scheduleStickyUpdate();
                     }
 
-                    // Mirrors VS Code's StickyScrollController for trees: the ancestor chain of
-                    // the top visible row is pinned, indented like the tree, with every directory
-                    // hidden under the stack represented, and a file bar handing over to the next
-                    // file only when that file reaches the bottom of the stack.
-                    let stickyFrame = 0;
-
-                    function updateStickyStack() {
-                        stickyFrame = 0;
-                        const rows = Array.prototype.slice.call(resultsDiv.querySelectorAll('[data-depth]'));
-                        if (!rows.length || resultsDiv.scrollTop < 4) {
-                            stickyStack.style.visibility = 'hidden';
-                            return;
-                        }
-
-                        const container = resultsDiv.getBoundingClientRect();
-                        const viewTop = container.top;
-                        // Deep trees need one bar per level; favour the innermost levels when the
-                        // stack would eat the list, and allow half the viewport rather than 40%.
-                        const maxBars = Math.max(2, Math.min(STICKY_MAX_BARS, Math.floor((container.height * 0.5) / STICKY_BAR_HEIGHT)));
-                        const topOf = (row) => row.getBoundingClientRect().top - viewTop;
-                        const bottomOf = (row) => row.getBoundingClientRect().bottom - viewTop;
-                        const depthOf = (row) => Number(row.dataset.depth);
-
-                        let first = -1;
-                        for (let index = 0; index < rows.length; index++) {
-                            if (bottomOf(rows[index]) > 0.5) { first = index; break; }
-                        }
-                        if (first < 0) {
-                            stickyStack.style.visibility = 'hidden';
-                            return;
-                        }
-
-                        const buildChain = () => {
-                            const chain = [];
-                            let depth = depthOf(rows[first]);
-                            for (let index = first - 1; index >= 0; index--) {
-                                if (depthOf(rows[index]) < depth) {
-                                    chain.unshift(index);
-                                    depth = depthOf(rows[index]);
-                                }
-                            }
-                            // The top row itself when it is an open parent (a file or directory
-                            // whose children continue below it).
-                            if (first + 1 < rows.length && depthOf(rows[first + 1]) > depthOf(rows[first])) {
-                                chain.push(first);
-                            }
-                            // Any directory scrolling under the stack must stay visible there.
-                            for (let index = first; index < rows.length; index++) {
-                                if (chain.indexOf(index) >= 0) continue;
-                                if (!rows[index].classList.contains('tree-dir')) continue;
-                                if (topOf(rows[index]) < chain.length * STICKY_BAR_HEIGHT && bottomOf(rows[index]) > 0) chain.push(index);
-                            }
-                            chain.sort((a, b) => a - b);
-                            // Too deep for the panel: keep the innermost levels, which is where the
-                            // current result lives, and drop the outermost ones.
-                            return chain;
-                        };
-
-                        let chain = buildChain();
-                        let push = 0;
-
-                        // A file bar is only pinned until the next file reaches the stack bottom.
-                        for (let guard = 0; guard < 3; guard++) {
-                            const last = chain[chain.length - 1];
-                            if (last === undefined || !rows[last].classList.contains('tree-file')) break;
-                            let end = last + 1;
-                            while (end < rows.length && depthOf(rows[end]) > depthOf(rows[last])) end++;
-                            if (end >= rows.length) break;
-                            const overlap = chain.length * STICKY_BAR_HEIGHT - topOf(rows[end]);
-                            if (overlap < STICKY_BAR_HEIGHT) {
-                                push = Math.max(0, overlap);
-                                break;
-                            }
-                            // Hand over: the finished file gives its slot to the next one.
-                            chain = chain.slice(0, -1);
-                            push = 0;
-                            if (topOf(rows[end]) < chain.length * STICKY_BAR_HEIGHT) chain.push(end);
-                        }
-
-                        if (chain.length === 0) {
-                            stickyStack.style.visibility = 'hidden';
-                            return;
-                        }
-
-                        const labelOf = (row) => {
-                            const name = row.querySelector('.dir-name');
-                            return name ? name.textContent : (row.dataset.path || '');
-                        };
-
-                        let entries = chain.map((rowIndex) => ({
-                            label: labelOf(rows[rowIndex]),
-                            depth: depthOf(rows[rowIndex])
-                        }));
-                        let merged = false;
-
-                        // VS Code compresses the overflow into one row (CompressibleStickyScroll
-                        // Delegate) instead of dropping levels: keep the outer bars and merge the
-                        // rest into a single joined path, so nothing - least of all the file -
-                        // disappears.
-                        if (entries.length > maxBars) {
-                            const keep = Math.max(1, maxBars - 1);
-                            const tail = entries.slice(keep);
-                            entries = entries.slice(0, keep);
-                            entries.push({
-                                label: tail.map((entry) => entry.label).join('/'),
-                                depth: tail[0].depth
-                            });
-                            merged = true;
-                        }
-
-                        while (stickyStack.childElementCount > entries.length) stickyStack.lastElementChild.remove();
-                        entries.forEach(function (entry, position) {
-                            let bar = stickyStack.children[position];
-                            if (!bar) {
-                                bar = document.createElement('div');
-                                bar.className = 'sticky-bar';
-                                stickyStack.appendChild(bar);
-                            }
-                            bar.textContent = entry.label;
-                            bar.title = entry.label;
-                            bar.style.top = (position * STICKY_BAR_HEIGHT) + 'px';
-                            bar.style.paddingLeft = (8 + entry.depth * 12) + 'px';
-                            const isLast = position === entries.length - 1;
-                            bar.style.transform = isLast && !merged && push > 0
-                                ? 'translateY(-' + Math.round(push) + 'px)'
-                                : '';
-                        });
-                        stickyStack.style.visibility = 'visible';
-                    }
-
-                    function scheduleStickyUpdate() {
-                        if (stickyFrame) cancelAnimationFrame(stickyFrame);
-                        stickyFrame = requestAnimationFrame(updateStickyStack);
-                    }
-
-                    resultsDiv.addEventListener('scroll', scheduleStickyUpdate, { passive: true });
 
                     viewToggleBtn.addEventListener('click', () => {
                         viewMode = viewMode === 'tree' ? 'flat' : 'tree';
