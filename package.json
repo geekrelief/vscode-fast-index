@@ -3,7 +3,7 @@
   "displayName": "Fast Project Indexer ",
   "description": "Lightning-fast text search for VS Code using a background inverted trigram index.",
   "publisher": "eric",
-  "version": "0.17.0",
+  "version": "0.17.1",
   "engines": {
     "vscode": "^1.108.0"
   },
@@ -213,13 +213,6 @@
           "minimum": 0,
           "maximum": 50,
           "description": "Lines shown above and below each match in the results editor (2 = two above, two below)."
-        },
-        "fastIndex.hoverJumpDelay": {
-          "type": "number",
-          "default": 0,
-          "minimum": 0,
-          "maximum": 10000,
-          "description": "Extra delay in milliseconds after VS Code resolves the hover, before the results editor jumps to that line. 0 jumps as soon as the hover fires; VS Code's own workbench.hover.delay still applies."
         },
         "fastIndex.persistPinnedSearches": {
           "type": "boolean",

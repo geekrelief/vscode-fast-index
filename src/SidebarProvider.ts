@@ -67,7 +67,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 maxResults: config.get<number>('maxResults') || 50,
                 maxRecentSearches: config.get<number>('maxRecentSearches') ?? 20,
                 panelFontSize: this.panelFontSize(),
-                hoverJumpDelay: config.get<number>('hoverJumpDelay') ?? 1500,
                 resultContextLines: config.get<number>('resultContextLines') ?? 2,
                 followEditor: config.get<boolean>('followEditor') ?? true,
                 persistPinnedSearches: config.get<boolean>('persistPinnedSearches') !== false,
@@ -496,7 +495,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         maxResults: config.get<number>('maxResults') ?? 50,
                         maxRecentSearches: config.get<number>('maxRecentSearches') ?? 20,
                         panelFontSize: this.panelFontSize(),
-                        hoverJumpDelay: config.get<number>('hoverJumpDelay') ?? 1500,
                         resultContextLines: config.get<number>('resultContextLines') ?? 2,
                         followEditor: config.get<boolean>('followEditor') ?? true,
                         persistPinnedSearches: config.get<boolean>('persistPinnedSearches') !== false,
@@ -519,7 +517,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         maxResults: clampNumber(input.maxResults, current.maxResults, 1, 100000),
                         maxRecentSearches: clampNumber(input.maxRecentSearches, current.maxRecentSearches, 0, 100),
                         panelFontSize: clampNumber(input.panelFontSize, current.panelFontSize, 9, 24),
-                        hoverJumpDelay: clampNumber(input.hoverJumpDelay, current.hoverJumpDelay, 0, 10000),
                         resultContextLines: clampNumber(input.resultContextLines, current.resultContextLines, 0, 50),
                         followEditor: typeof input.followEditor === 'boolean' ? input.followEditor : current.followEditor,
                         persistPinnedSearches: typeof input.persistPinnedSearches === 'boolean' ? input.persistPinnedSearches : current.persistPinnedSearches,
@@ -1108,10 +1105,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             <input type="number" id="confMaxRecent" min="0" max="100" />
                         </div>
                         <div class="setting-item">
-                            <label>Hover Jump Delay (ms, 0 = instant)</label>
-                            <input type="number" id="confHoverDelay" min="0" step="50" />
-                        </div>
-                        <div class="setting-item">
                             <label>Results Context Lines (above and below)</label>
                             <input type="number" id="confContextLines" min="0" max="50" step="1" />
                         </div>
@@ -1233,7 +1226,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const confFollowEditor = document.getElementById('confFollowEditor');
                     const confAutoSearchResults = document.getElementById('confAutoSearchResults');
                     const confPersistPinned = document.getElementById('confPersistPinned');
-                    const confHoverDelay = document.getElementById('confHoverDelay');
                     const confAutoOpenResults = document.getElementById('confAutoOpenResults');
                     const confContextLines = document.getElementById('confContextLines');
                     const scopeInclude = document.getElementById('scopeInclude');
@@ -1264,7 +1256,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     let userOwnsQuery = false;
                     let applyingPrefill = false;
                     let pinnedSearches = [];
-                    let hoverDelay = 1500;
+                    let hoverDelay = 0;
                     let showContextLine = true;
                     let locked = false;
                     let pinnedVisible = true;
@@ -1451,7 +1443,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             maxRecentSearches: parseInt(confMaxRecent.value, 10),
                             followEditor: confFollowEditor.checked,
                             persistPinnedSearches: confPersistPinned.checked,
-                            hoverJumpDelay: confHoverDelay.value,
                             resultContextLines: confContextLines.value,
                             autoOpenResults: confAutoOpenResults?.checked === true,
                             autoSearchFromResults: confAutoSearchResults?.checked === true,
@@ -1472,7 +1463,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         configSaveTimer = setTimeout(flushConfig, 350);
                     }
 
-                    [confIncludeExt, confExcludePat, confMaxFileSize, confMaxResults, confPanelFont, confMaxRecent, confHoverDelay, confContextLines]
+                    [confIncludeExt, confExcludePat, confMaxFileSize, confMaxResults, confPanelFont, confMaxRecent, confContextLines]
                         .filter(Boolean)
                         .forEach(function (field) {
                             field.addEventListener('input', saveConfigSoon);
@@ -2176,7 +2167,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             }
                             confFollowEditor.checked = message.value.followEditor !== false;
                             confPersistPinned.checked = message.value.persistPinnedSearches !== false;
-                            confHoverDelay.value = message.value.hoverJumpDelay ?? 1500;
                             confContextLines.value = message.value.resultContextLines ?? 2;
                             if (confAutoOpenResults) confAutoOpenResults.checked = message.value.autoOpenResults === true;
                             if (confAutoSearchResults) confAutoSearchResults.checked = message.value.autoSearchFromResults === true;
@@ -2186,7 +2176,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                                 showContextLine = showContext;
                                 renderResults();
                             }
-                            hoverDelay = Number.isFinite(Number(message.value.hoverJumpDelay)) ? Math.max(0, Number(message.value.hoverJumpDelay)) : 1500;
                             if (typeof message.value.maxRecentSearches === 'number') {
                                 confMaxRecent.value = message.value.maxRecentSearches;
                                 maxRecent = Math.max(0, Math.min(100, Math.floor(message.value.maxRecentSearches)));

@@ -50,7 +50,7 @@ Three of these settings shape the index itself: **Include Extensions**, **Exclud
 * **Max Search Results:** Limit the number of snippets shown to keep the UI responsive (default is `50`).
 * **Show the hit's context line under each result:** on/off (default on, also `fastIndex.showContextLine`). Turn it off for a compact file-and-line list; the list re-renders as soon as you toggle it.
 * **Panel Font Size (px):** Text size for the panel — search results, pinned searches, buttons — default `14`, range `9`–`24`. Everything in the panel scales from it, and the change is visible as you type.
-* **Hover Jump Delay:** Milliseconds to rest the pointer on a result before the results editor jumps to that line (default `1500`, 0 = instant).
+* **Hover jump timing** follows VS Code's own `workbench.hover.delay`; the extension no longer has a delay setting of its own.
 * **Results Context Lines:** Lines shown above and below each match in the results editor (default `2`).
 * **Keep pinned searches between sessions:** on/off (default on).
 * **Open the results editor automatically:** on/off (default off, also `fastIndex.autoOpenResults`). When on, a search that finds matches reopens the results tab if you closed it — without stealing focus, so you can keep typing in the panel.
@@ -82,7 +82,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog
 
-### 0.8.0 → 0.17.0 — native results tree, hover jump, pinned section, results editor and settings fixes
+### 0.8.0 → 0.17.1 — native results tree, hover jump, pinned section, results editor and settings fixes
 
 #### Results tab in the editor
 
@@ -95,7 +95,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 * The panel still owns everything: one stable tab is rewritten in place on every new search (including replacements and Tree/List switches), so query, filters and context lines are always the panel's current ones — there are no controls inside the document.
 * New **`fastIndex.autoOpenResults`** (default off): a search that finds matches reopens the tab if it was closed, with `preserveFocus` so the search box keeps the keyboard. Closing that tab is treated as deliberate — by mouse or by shortcut, it took an explicit action — so the next result-bearing search opens it again.
 * "Is the tab open?" is now judged from the tab strip (`window.tabGroups`), not from loaded documents: a closed virtual document stays loaded in memory, which previously made the tab stop auto-opening after a few searches while the panel kept updating.
-* Resting the pointer on a result scrolls that tab to the hit (`fastIndex.hoverJumpDelay`, default 1500 ms) and **selects that line**; the selection stays until another result is hovered, takes no focus, and is cleared when a new search rewrites the document.
+* Resting the pointer on a result scrolls that tab to the hit (timing is VS Code's `workbench.hover.delay`) and **selects that line**; the selection stays until another result is hovered, takes no focus, and is cleared when a new search rewrites the document.
 
 #### Removed: both previews
 
@@ -117,7 +117,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 * **Save & Reindex** is now just **Reindex**. Index-affecting edits (include extensions, exclude patterns, max file size) no longer rebuild the index behind your back while you type.
 * The panel tracks what the last successful build actually consumed, so it can say the index is **stale** rather than guessing: a banner names the changed fields and offers **Undo changes** to restore the indexed values, next to **Reindex**.
 * Leaving the settings view or hiding the panel with a pending index change asks **Reindex now / Reject changes / Keep for now**; it asks once per distinct set of values, so "Keep for now" does not nag on every panel hide.
-* `fastIndex.previewHoverDelay` → **`fastIndex.hoverJumpDelay`** (delay before the results tab jumps to a hovered hit).
+* Removed **`fastIndex.hoverJumpDelay`**: with the native tree the hover is resolved by VS Code, so its timing is `workbench.hover.delay` and an extra delay setting was redundant.
 * `fastIndex.previewContextLines` → **`fastIndex.resultContextLines`**.
 * New **`fastIndex.autoOpenResults`** (default off).
 * New **`fastIndex.panelFontSize`** (default 14 px, range 9–24): the webview's root font size, so search results, pinned searches and buttons all scale together. The panel is rendered with it and resizes as you type.
@@ -132,7 +132,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 * **Replace moved to the context menu.** The per-row inline Replace button is gone; right-clicking a match offers **Replace This Match…**, which prompts for the replacement (prefilled with the last value used) and then refreshes the tree and the results editor.
 * The webview still owns the search box, filter, scope fields and settings; its results area is no longer rendered.
 * **Pinned Searches is its own collapsible section** (`fast-index.pins`), so pins can no longer overlap the results. Click a pin to restore it; right-click to **Remove Pinned Search**.
-* **Hover jump works through `resolveTreeItem`.** A `TreeView` has no hover event, but VS Code calls the provider's `resolveTreeItem(item, element)` *when the pointer rests on a row* — because the row's `tooltip` is left undefined and the contract says it is "called on hover to resolve the tooltip if it is undefined". Match rows therefore omit their tooltip and supply it only from that call, which also fires the jump into the results editor. Folder and file rows keep eager tooltips and never trigger it. VS Code calls this once per item, but the effect is idempotent (it selects the same line again). Timing follows `workbench.hover.delay`; `fastIndex.hoverJumpDelay` adds an optional extra delay (default 0). Selecting a match still jumps as well.
+* **Hover jump works through `resolveTreeItem`.** A `TreeView` has no hover event, but VS Code calls the provider's `resolveTreeItem(item, element)` *when the pointer rests on a row* — because the row's `tooltip` is left undefined and the contract says it is "called on hover to resolve the tooltip if it is undefined". Match rows therefore omit their tooltip and supply it only from that call, which also fires the jump into the results editor. Folder and file rows keep eager tooltips and never trigger it. The delay is `workbench.hover.delay` (there is no per-widget override); VS Code calls this once per item, but the effect is idempotent. Selecting a match still jumps as well.
 * File names are **bold** in both the tree and the flat list; directory nodes are semi-bold (600) so the two levels stay distinguishable.
 * New **`fastIndex.showContextLine`** toggle to hide the matched line under each result for a compact file-and-line list.
 
