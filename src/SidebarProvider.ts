@@ -1965,7 +1965,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
                         const container = resultsDiv.getBoundingClientRect();
                         const viewTop = container.top;
-                        const maxBars = Math.max(2, Math.min(STICKY_MAX_BARS, Math.floor((container.height * 0.4) / STICKY_BAR_HEIGHT)));
+                        // Deep trees need one bar per level; favour the innermost levels when the
+                        // stack would eat the list, and allow half the viewport rather than 40%.
+                        const maxBars = Math.max(2, Math.min(STICKY_MAX_BARS, Math.floor((container.height * 0.5) / STICKY_BAR_HEIGHT)));
                         const topOf = (row) => row.getBoundingClientRect().top - viewTop;
                         const bottomOf = (row) => row.getBoundingClientRect().bottom - viewTop;
                         const depthOf = (row) => Number(row.dataset.depth);
@@ -1982,23 +1984,27 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         const buildChain = () => {
                             const chain = [];
                             let depth = depthOf(rows[first]);
-                            for (let index = first - 1; index >= 0 && chain.length < maxBars; index--) {
+                            for (let index = first - 1; index >= 0; index--) {
                                 if (depthOf(rows[index]) < depth) {
                                     chain.unshift(index);
                                     depth = depthOf(rows[index]);
                                 }
                             }
-                            // The top row itself when it is an open parent.
-                            if (chain.length < maxBars && first + 1 < rows.length && depthOf(rows[first + 1]) > depthOf(rows[first])) {
+                            // The top row itself when it is an open parent (a file or directory
+                            // whose children continue below it).
+                            if (first + 1 < rows.length && depthOf(rows[first + 1]) > depthOf(rows[first])) {
                                 chain.push(first);
                             }
                             // Any directory scrolling under the stack must stay visible there.
-                            for (let index = first; index < rows.length && chain.length < maxBars; index++) {
+                            for (let index = first; index < rows.length; index++) {
                                 if (chain.indexOf(index) >= 0) continue;
                                 if (!rows[index].classList.contains('tree-dir')) continue;
                                 if (topOf(rows[index]) < chain.length * STICKY_BAR_HEIGHT && bottomOf(rows[index]) > 0) chain.push(index);
                             }
                             chain.sort((a, b) => a - b);
+                            // Too deep for the panel: keep the innermost levels, which is where the
+                            // current result lives, and drop the outermost ones.
+                            while (chain.length > maxBars) chain.shift();
                             return chain;
                         };
 
