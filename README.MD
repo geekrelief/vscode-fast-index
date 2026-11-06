@@ -83,7 +83,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog
 
-### 0.8.0 → 0.21.1 — native results tree, hover jump, pinned section, settings section, results editor and settings fixes
+### 0.8.0 → 0.21.2 — native results tree, hover jump, pinned section, settings section, results editor and settings fixes
 
 #### Results tab in the editor
 
@@ -144,7 +144,9 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 * Directory rows carry **no icon** — the tree is a result list, not a file browser. File names are **bold**; directory nodes are semi-bold (600) so the two levels stay distinguishable.
 * New **`fastIndex.showContextLine`** toggle to hide the matched line under each result for a compact file-and-line list.
 
-#### Section layout (0.21.1)
+#### Section layout (0.21.2)
+
+* **The search panel can no longer hide its own fields.** When the sections below squeeze its pane, the panel body now scrolls (`overflow-y: auto`, content sized to its own height instead of being flex-shrunk), so *Skip*, *Only in*, the replace field and Replace All stay reachable instead of being clipped — and focusing a field scrolls it into view. The pane height itself is the workbench splitview's, which the extension cannot clamp.
 
 * Section heights, border positions and collapsed state are **workbench-owned**: VS Code stores them per view in `views.customizations` at application scope (`ViewDescriptorService`), so they persist across sessions and workspaces without the extension doing anything.
 * The extension API has no way to set a view's size or collapsed state, so the only code that could destroy that layout is our own. The ⚙️ button therefore **focuses** the Settings section instead of hiding it — `toggleVisibility` was removed, because re-showing a hidden pane puts it back at its default height.

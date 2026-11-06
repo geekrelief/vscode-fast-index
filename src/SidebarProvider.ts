@@ -1286,11 +1286,13 @@ vscode.postMessage({ type: 'getCaches' });
     private styles(): string {
         return `
                     html, body { height: 100%; }
-                    body { font-family: var(--vscode-font-family); font-size: ${this.panelFontSize()}px; padding: 0; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; }
+                    /* The pane can be squeezed by the sections below it: scroll the
+                       controls instead of clipping the bottom fields (Skip, Replace). */
+                    body { font-family: var(--vscode-font-family); font-size: ${this.panelFontSize()}px; padding: 0; box-sizing: border-box; display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; }
                     /* Settings are tall: let the whole panel scroll so every group is reachable. */
                     body.settings-open { overflow-y: auto; }
                     body.settings-open .content { flex: 0 0 auto; min-height: 0; padding-bottom: 24px; }
-                    .content { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; padding: 8px 10px 10px 10px; box-sizing: border-box; }
+                    .content { flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0; padding: 8px 10px 10px 10px; box-sizing: border-box; }
                     /* Results are rendered by the native tree view (fast-index.results); the webview keeps the controls. */
                     #results, .results-toolbar { display: none !important; }
                     .status-row { display: flex; align-items: center; gap: 6px; font-size: 0.8em; margin-bottom: 8px; opacity: 0.9; }
@@ -1747,6 +1749,15 @@ vscode.postMessage({ type: 'getCaches' });
 
 
                     searchInput.addEventListener('blur', function () { setTimeout(hideHistory, 120); });
+
+                    // With the pane squeezed by the sections below, keep whatever the user
+                    // is typing in reach: scroll the focused field into view.
+                    document.addEventListener('focusin', function (event) {
+                        const target = event.target;
+                        if (target && typeof target.scrollIntoView === 'function') {
+                            target.scrollIntoView({ block: 'nearest' });
+                        }
+                    });
 
                     document.addEventListener('visibilitychange', function () {
                         if (document.visibilityState === 'hidden') rememberSearch(searchInput.value);
