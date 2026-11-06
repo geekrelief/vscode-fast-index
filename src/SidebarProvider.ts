@@ -48,6 +48,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private searchGeneration = 0;
     private lastSnapshot: { query: string; isRegex: boolean; isMatchCase: boolean; filter: string; include: string[]; exclude: string[]; rows: any[] } | undefined;
 
+    /** Panel font size in px; every `em` size in the webview scales from it. */
+    private panelFontSize(): number {
+        const configured = vscode.workspace.getConfiguration('fastIndex').get<number>('panelFontSize');
+        return typeof configured === 'number' && Number.isFinite(configured)
+            ? Math.max(9, Math.min(24, Math.round(configured)))
+            : 14;
+    }
+
     public sendConfig(): void {
         const config = vscode.workspace.getConfiguration('fastIndex');
         void this._view?.webview.postMessage({
@@ -58,6 +66,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 maxFileSizeKB: config.get<number>('maxFileSizeKB') || 512,
                 maxResults: config.get<number>('maxResults') || 50,
                 maxRecentSearches: config.get<number>('maxRecentSearches') ?? 20,
+                panelFontSize: this.panelFontSize(),
                 hoverJumpDelay: config.get<number>('hoverJumpDelay') ?? 1500,
                 resultContextLines: config.get<number>('resultContextLines') ?? 2,
                 followEditor: config.get<boolean>('followEditor') ?? true,
@@ -461,6 +470,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         maxFileSizeKB: config.get<number>('maxFileSizeKB') ?? 512,
                         maxResults: config.get<number>('maxResults') ?? 50,
                         maxRecentSearches: config.get<number>('maxRecentSearches') ?? 20,
+                        panelFontSize: this.panelFontSize(),
                         hoverJumpDelay: config.get<number>('hoverJumpDelay') ?? 1500,
                         resultContextLines: config.get<number>('resultContextLines') ?? 2,
                         followEditor: config.get<boolean>('followEditor') ?? true,
@@ -482,6 +492,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         maxFileSizeKB: clampNumber(input.maxFileSizeKB, current.maxFileSizeKB, 1, 102400),
                         maxResults: clampNumber(input.maxResults, current.maxResults, 1, 100000),
                         maxRecentSearches: clampNumber(input.maxRecentSearches, current.maxRecentSearches, 0, 100),
+                        panelFontSize: clampNumber(input.panelFontSize, current.panelFontSize, 9, 24),
                         hoverJumpDelay: clampNumber(input.hoverJumpDelay, current.hoverJumpDelay, 0, 10000),
                         resultContextLines: clampNumber(input.resultContextLines, current.resultContextLines, 0, 50),
                         followEditor: typeof input.followEditor === 'boolean' ? input.followEditor : current.followEditor,
@@ -872,7 +883,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             <head>
                 <style>
                     html, body { height: 100%; }
-                    body { font-family: var(--vscode-font-family); padding: 0; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; }
+                    body { font-family: var(--vscode-font-family); font-size: ${this.panelFontSize()}px; padding: 0; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; }
                     .content { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; padding: 8px 10px 10px 10px; box-sizing: border-box; }
                     #results { flex: 1 1 auto; overflow-y: auto; min-height: 40px; }
                     .status-row { display: flex; align-items: center; gap: 6px; font-size: 0.8em; margin-bottom: 8px; opacity: 0.9; }
@@ -1036,6 +1047,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     <section class="settings-group">
                         <h3 class="settings-group-title">Search Settings</h3>
                         <div class="setting-item">
+                            <label>Panel Font Size (px)</label>
+                            <input type="number" id="confPanelFont" min="9" max="24" step="1" />
+                        </div>
+                        <div class="setting-item">
                             <label>Max Search Results</label>
                             <input type="number" id="confMaxResults" />
                         </div>
@@ -1153,6 +1168,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const confExcludePat = document.getElementById('confExcludePat');
                     const confMaxFileSize = document.getElementById('confMaxFileSize');
                     const confMaxResults = document.getElementById('confMaxResults');
+                    const confPanelFont = document.getElementById('confPanelFont');
                     const historyList = document.getElementById('historyList');
                     const historyBtn = document.getElementById('historyBtn');
                     const treeMenu = document.getElementById('treeMenu');
@@ -1377,6 +1393,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             excludePatterns: confExcludePat.value,
                             maxFileSizeKB: parseInt(confMaxFileSize.value, 10),
                             maxResults: parseInt(confMaxResults.value, 10),
+                            panelFontSize: parseInt(confPanelFont.value, 10),
                             maxRecentSearches: parseInt(confMaxRecent.value, 10),
                             followEditor: confFollowEditor.checked,
                             persistPinnedSearches: confPersistPinned.checked,
@@ -1400,7 +1417,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         configSaveTimer = setTimeout(flushConfig, 350);
                     }
 
-                    [confIncludeExt, confExcludePat, confMaxFileSize, confMaxResults, confMaxRecent, confHoverDelay, confContextLines]
+                    [confIncludeExt, confExcludePat, confMaxFileSize, confMaxResults, confPanelFont, confMaxRecent, confHoverDelay, confContextLines]
                         .filter(Boolean)
                         .forEach(function (field) {
                             field.addEventListener('input', saveConfigSoon);
@@ -1417,6 +1434,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         .forEach(function (field) {
                             field.addEventListener('change', flushConfig);
                         });
+
+                    // Resize the panel as the number is typed, not just once it is saved.
+                    if (confPanelFont) {
+                        confPanelFont.addEventListener('input', function () {
+                            const size = parseInt(confPanelFont.value, 10);
+                            if (!Number.isFinite(size)) return;
+                            document.body.style.fontSize = Math.max(9, Math.min(24, size)) + 'px';
+                        });
+                    }
 
                     reindexBtn.addEventListener('click', () => {
                         vscode.postMessage({ type: 'rebuildIndex' });
@@ -2105,6 +2131,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             confExcludePat.value = message.value.excludePatterns;
                             confMaxFileSize.value = message.value.maxFileSizeKB;
                             confMaxResults.value = message.value.maxResults;
+                            if (confPanelFont) confPanelFont.value = message.value.panelFontSize ?? 14;
+                            if (typeof message.value.panelFontSize === 'number') {
+                                document.body.style.fontSize = Math.max(9, Math.min(24, message.value.panelFontSize)) + 'px';
+                            }
                             confFollowEditor.checked = message.value.followEditor !== false;
                             confPersistPinned.checked = message.value.persistPinnedSearches !== false;
                             confHoverDelay.value = message.value.hoverJumpDelay ?? 1500;
