@@ -23,6 +23,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private suppressPrefillUntil = 0;
     /** Where the user last put the caret, so opening the panel can tell that from an open at 0,0. */
     private lastUserCursor?: { uri: string; line: number; character: number };
+    private lockNoticed = false;
     private _statusText = 'Starting…';
     private _statusState: 'busy' | 'ready' | 'idle' = 'busy';
 
@@ -71,6 +72,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     public setLock(value: boolean): void {
         this.locked = Boolean(value);
+        this.lockNoticed = false;
         void this.memento?.update('fastIndex.locked', this.locked);
         void vscode.commands.executeCommand('setContext', 'fastIndex.locked', this.locked);
         void this._view?.webview.postMessage({ type: 'locked', value: this.locked });
@@ -470,6 +472,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.prefillFromEditor(editor.selection.isEmpty ? 'open-cursor' : 'open-selection');
     }
 
+    /** Explains, once per lock, why clicking around stops filling the box. */
+    private noteLockedPrefill(): void {
+        if (this.lockNoticed) return;
+        this.lockNoticed = true;
+        log('prefill paused: results are locked — click the lock button in the title bar to unlock');
+    }
+
     /** True when the caret sits exactly where the user last put it, not where an open put it. */
     private isDeliberateCursor(editor: vscode.TextEditor): boolean {
         const mark = this.lastUserCursor;
@@ -481,7 +490,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     private prefillFromEditor(source: string = 'cursor'): void {
-        if (this.locked) return;
+        if (this.locked) {
+            this.noteLockedPrefill();
+            return;
+        }
         if (vscode.workspace.getConfiguration('fastIndex').get<boolean>('followEditor') === false) return;
         if (Date.now() < this.suppressPrefillUntil) return;
 
@@ -826,6 +838,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     .results-toolbar { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
                     .tool-btn { padding: 2px 8px; font-size: 0.8em; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); flex: 0 0 auto; }
                     .tool-btn:hover { background: var(--vscode-button-secondaryHoverBackground); }
+                    .lock-badge { font-size: 0.8em; padding: 1px 8px; border-radius: 8px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); white-space: nowrap; }
                     .results-count { margin-left: auto; font-size: 0.8em; opacity: 0.7; }
                     .subsearch input { width: 100%; padding: 4px 6px; margin-bottom: 6px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); box-sizing: border-box; font-size: 0.85em; }
                     .subsearch input:focus { border-color: var(--vscode-focusBorder); outline: none; }
@@ -960,6 +973,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     <button id="viewToggleBtn" class="tool-btn" title="Switch between flat list and directory tree">🌳 Tree</button>
                     <button id="expandAllBtn" class="tool-btn" title="Expand every directory down to its files">⊞ Expand all</button>
                     <button id="collapseAllBtn" class="tool-btn" title="Collapse every directory">⊟ Collapse all</button>
+                    <span class="lock-badge" id="lockBadge" style="display: none;" title="Results are locked, so the search box does not follow the editor. Click the lock button in the title bar to unlock.">🔒 Locked</span>
                     <span class="results-count" id="resultsCount"></span>
                 </div>
 
@@ -1022,6 +1036,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const expandAllBtn = document.getElementById('expandAllBtn');
                     const collapseAllBtn = document.getElementById('collapseAllBtn');
                     const resultsCount = document.getElementById('resultsCount');
+                    const lockBadge = document.getElementById('lockBadge');
                     const statusTextEl = document.getElementById('statusText');
                     const statusDotEl = document.getElementById('statusDot');
 
@@ -1740,6 +1755,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     function setLocked(value) {
                         locked = Boolean(value);
                         vscode.setState(Object.assign({}, vscode.getState(), { locked: locked }));
+                        if (lockBadge) lockBadge.style.display = locked ? '' : 'none';
                     }
 
                     setLocked(locked);

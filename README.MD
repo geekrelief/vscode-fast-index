@@ -12,7 +12,7 @@ Instead of searching text "on the fly" for every query, the plugin builds an inv
 * **Results in the editor:** the book icon in the title bar (**Fast Index: Open Results in Editor**) opens the current results as a real editor tab, written in VS Code's own search-editor format so the built-in `search-result` language gives it theme-driven syntax highlighting, Follow-link targets and peek-on-click. It is driven by the panel and refreshed in place. Set `fastIndex.autoOpenResults` to have it open itself after a search.
 * **Hover follows into the results editor:** resting the pointer on a result for `fastIndex.hoverJumpDelay` (default 1500 ms) scrolls the results tab to that exact hit and puts the caret on it — without taking focus, so the search box keeps the keyboard. Only the row the pointer is still resting on counts; sweeping across results never yanks the tab around. If the tab is closed or hidden nothing happens.
 * **Balanced results:** at most `fastIndex.maxResultsPerFile` matching lines per file (default 3, 0 = unlimited) and a fair share of the result list per workspace folder, so one huge engine file can no longer hide your own project's hits.
-* **Title-bar buttons:** the 🔒/🔓 lock, ⚙️ settings and ☰ menu sit in the view's title bar next to the name, like the built-in Search view. The 🔒 **lock** freezes the search — clicking or moving the cursor in the editor no longer refills the query, so results stay put while you read code; the state survives reloads. The ☰ menu offers pinned-search show/hide, the results editor and the search log.
+* **Title-bar buttons:** the 🔒/🔓 lock, ⚙️ settings and ☰ menu sit in the view's title bar next to the name, like the built-in Search view. The 🔒 **lock** freezes the search — clicking or moving the cursor in the editor no longer refills the query, so results stay put while you read code; the state survives reloads (a **🔒 Locked** badge in the results toolbar shows when a lock is in force). The ☰ menu offers pinned-search show/hide, the results editor and the search log.
 * **Pinned searches:** the 📌 button saves the current search — term, `Aa`/`.*`, `Only in`, `Skip`, the results filter and your collapsed tree branches. Pins live in a scrollable, resizable box anchored at the bottom of the panel (drag its top edge to resize, or hide it from the ☰ menu); each shows the main term with its extra parameters (scope, filter, `Aa`/`.*`) in muted text beneath, so pins with the same term stay distinguishable. Click one to restore the whole state, or use its ✕ to remove it. Kept per workspace and across sessions by `fastIndex.persistPinnedSearches` (default on; turn it off — or untick it in the panel settings — to keep pins for the session only).
 * **Search log:** the ☰ menu's *Show the search log* opens a **Fast Index** output panel that records every search with its trigger (typing, pin, filter, scope, prefill…), its scope/filter and the result counts, plus prefills that were ignored and why, and searches superseded by a newer one. Use it when results change unexpectedly.
 * **Latest search wins:** starting a search cancels the one in flight; stale results are discarded instead of overwriting the newer list.
@@ -76,7 +76,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog — current development session
 
-Everything below landed in one session (0.3.6 → 0.10.2).
+Everything below landed in one session (0.3.6 → 0.10.3).
 
 ### Search UI
 
