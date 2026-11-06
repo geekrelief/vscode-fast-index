@@ -28,8 +28,6 @@ export class ResultsView implements vscode.Disposable {
     private syncQueued = false;
     /** `${file}:${line}` -> document line of the matching hit, filled by render(). */
     private matchLines = new Map<string, number>();
-    private hoverHighlight?: vscode.TextEditorDecorationType;
-    private hoverHighlightTimer?: ReturnType<typeof setTimeout>;
     private lastPeek?: { line: number; version: number; at: number };
 
     public constructor(
@@ -115,10 +113,11 @@ export class ResultsView implements vscode.Disposable {
     }
 
     /**
-     * Scrolls the results tab to a specific hit and flashes that line. Called when
-     * the pointer rests on a result in the sidebar; a closed or hidden tab is left
-     * alone, the caret is not moved, and nothing is focused, so the panel keeps the
-     * keyboard and no search is re-run.
+     * Scrolls the results tab to a specific hit and selects that line. Called when
+     * the pointer rests on a result in the sidebar; the selection is a plain text
+     * selection (so it looks native and can be copied), it stays until another
+     * result is hovered, and it cannot refill the search box: selections from this
+     * document are ignored by Auto Search.
      */
     public reveal(file: string, line: number): void {
         const target = this.matchLines.get(file + ':' + line);
@@ -132,29 +131,15 @@ export class ResultsView implements vscode.Disposable {
 
         const range = editor.document.lineAt(target).range;
         editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
-
-        if (!this.hoverHighlight) {
-            // The theme's own hover colour: it reads as "this is what you are pointing at"
-            // without competing with the match decorations the search-result grammar adds.
-            this.hoverHighlight = vscode.window.createTextEditorDecorationType({
-                isWholeLine: true,
-                backgroundColor: new vscode.ThemeColor('editor.hoverHighlightBackground')
-            });
-        }
-        editor.setDecorations(this.hoverHighlight, [range]);
-
-        if (this.hoverHighlightTimer) clearTimeout(this.hoverHighlightTimer);
-        this.hoverHighlightTimer = setTimeout(() => {
-            this.hoverHighlightTimer = undefined;
-            this.clearHoverHighlight();
-        }, 1500);
+        editor.selection = new vscode.Selection(range.start, range.end);
     }
 
-    private clearHoverHighlight(): void {
-        if (!this.hoverHighlight) return;
+    /** Drops the hover selection when the document is rewritten, so it cannot go stale. */
+    private resetSelection(): void {
         for (const editor of vscode.window.visibleTextEditors) {
             if (editor.document.uri.scheme !== ResultsDocumentProvider.scheme) continue;
-            editor.setDecorations(this.hoverHighlight, []);
+            const start = new vscode.Position(0, 0);
+            editor.selection = new vscode.Selection(start, start);
         }
     }
 
@@ -172,6 +157,8 @@ export class ResultsView implements vscode.Disposable {
         this.building = true;
         try {
             this.provider.setText(await this.render(snapshot));
+            // New content means any hover selection now points at a different line.
+            this.resetSelection();
         } catch {
             /* a failed rebuild leaves the previous content in place */
         } finally {
@@ -261,10 +248,6 @@ export class ResultsView implements vscode.Disposable {
     }
 
     public dispose(): void {
-        if (this.hoverHighlightTimer) clearTimeout(this.hoverHighlightTimer);
-        this.hoverHighlightTimer = undefined;
-        this.hoverHighlight?.dispose();
-        this.hoverHighlight = undefined;
         this.disposables.forEach(disposable => disposable.dispose());
         this.disposables.length = 0;
     }

@@ -3,7 +3,7 @@
   "displayName": "Fast Project Indexer ",
   "description": "Lightning-fast text search for VS Code using a background inverted trigram index.",
   "publisher": "eric",
-  "version": "0.11.4",
+  "version": "0.12.0",
   "engines": {
     "vscode": "^1.108.0"
   },
@@ -192,6 +192,11 @@
           "type": "boolean",
           "default": false,
           "description": "Open the results editor automatically whenever a search finds matches and that editor is not already open. It appears without taking focus, so typing in the panel continues undisturbed."
+        },
+        "fastIndex.autoSearchFromResults": {
+          "type": "boolean",
+          "default": false,
+          "description": "Let clicking or selecting inside the results editor update the search box (Auto Search). Off by default, so selecting a result line there never disturbs your query."
         }
       }
     }

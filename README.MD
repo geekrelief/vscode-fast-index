@@ -10,7 +10,7 @@ Instead of searching text "on the fly" for every query, the plugin builds an inv
 * **No surprise prefills:** opening the panel never restores the previous query. It seeds the box from an explicit **selection**, or from a caret **you** placed (clicking a word, or typing) — never from the caret a file open leaves at 0,0. While the panel is open, clicking onto a word (or selecting text) keeps the box in sync, and the box stops being "yours" as soon as focus returns to the editor. Toggle the whole behaviour with `fastIndex.followEditor` (or the checkbox in the panel settings), or freeze it temporarily with the 🔒 title-bar lock.
 * **Replace keeps the index current:** applying a replacement re-indexes the affected buffers immediately, and searching reads open (dirty) documents, so replaced text disappears from results and new text is findable without saving first.
 * **Results in the editor:** the book icon in the title bar (**Fast Index: Open Results in Editor**) opens the current results as a real editor tab, written in VS Code's own search-editor format so the built-in `search-result` language gives it theme-driven syntax highlighting, Follow-link targets and peek-on-click. It is driven by the panel and refreshed in place. Set `fastIndex.autoOpenResults` to have it open itself after a search.
-* **Hover follows into the results editor:** resting the pointer on a result for `fastIndex.hoverJumpDelay` (default 1500 ms) scrolls the results tab to that exact hit and flashes that line with the theme's own hover colour — without taking focus, moving the caret or re-running the search, so the search box keeps the keyboard. Only the row the pointer is still resting on counts; sweeping across results never yanks the tab around. If the tab is closed or hidden nothing happens.
+* **Hover follows into the results editor:** resting the pointer on a result for `fastIndex.hoverJumpDelay` (default 1500 ms) scrolls the results tab to that exact hit and **selects that line**, so the indicator is a normal text selection that stays until you hover a different result. It never takes focus and never refills the search box (selections made in the results editor are ignored by Auto Search unless you turn on `fastIndex.autoSearchFromResults`). Only the row the pointer is still resting on counts; sweeping across results never yanks the tab around. If the tab is closed or hidden nothing happens.
 * **Balanced results:** at most `fastIndex.maxResultsPerFile` matching lines per file (default 3, 0 = unlimited) and a fair share of the result list per workspace folder, so one huge engine file can no longer hide your own project's hits.
 * **Title-bar buttons:** the 🔒/🔓 lock, ⚙️ settings and ☰ menu sit in the view's title bar next to the name, like the built-in Search view. The 🔒 **lock** freezes the search — clicking or moving the cursor in the editor no longer refills the query, so results stay put while you read code; the state survives reloads (a **🔒 Locked** badge in the results toolbar shows when a lock is in force). The ☰ menu offers pinned-search show/hide, the results editor and the search log.
 * **⚡ editor title button:** every editor shows the same zap icon as the view container; clicking it brings the Fast Index panel forward. That is what gets you back to the panel after the container has been moved to the **Secondary Side Bar**, where the Activity Bar icon is gone.
@@ -53,6 +53,7 @@ Three of these settings shape the index itself: **Include Extensions**, **Exclud
 * **Keep pinned searches between sessions:** on/off (default on).
 * **Open the results editor automatically:** on/off (default off, also `fastIndex.autoOpenResults`). When on, a search that finds matches reopens the results tab if you closed it — without stealing focus, so you can keep typing in the panel.
 * **Auto Search: Follows text editor cursor and selection:** on/off.
+* **Auto Search from the results window:** on/off (default off, also `fastIndex.autoSearchFromResults`). Off means selecting a line in the results editor never disturbs your query; on means that selection fills the search box like an editor selection would.
 * **Cached indexes:** The settings panel lists every cached workspace folder with its build date and size. Tick the ones you want to drop (or **Select all**) and press **Delete selected**; a confirmation dialog is shown before anything is deleted. **Reindex selected** re-scans only the ticked folders and leaves the other caches untouched. Caches whose folder no longer exists are marked **missing**, and **Delete stale** removes all of them in one confirmed step. A deleted folder is re-indexed only when you run **Fast Index: Build Project Index**.
 
 ## Where the index lives
@@ -79,7 +80,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog
 
-### 0.8.0 → 0.11.4 — results editor, preview removal, prefill and settings fixes
+### 0.8.0 → 0.12.0 — results editor, preview removal, prefill and settings fixes
 
 #### Results tab in the editor
 
@@ -92,7 +93,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 * The panel still owns everything: one stable tab is rewritten in place on every new search (including replacements and Tree/List switches), so query, filters and context lines are always the panel's current ones — there are no controls inside the document.
 * New **`fastIndex.autoOpenResults`** (default off): a search that finds matches reopens the tab if it was closed, with `preserveFocus` so the search box keeps the keyboard. Closing that tab is treated as deliberate — by mouse or by shortcut, it took an explicit action — so the next result-bearing search opens it again.
 * "Is the tab open?" is now judged from the tab strip (`window.tabGroups`), not from loaded documents: a closed virtual document stays loaded in memory, which previously made the tab stop auto-opening after a few searches while the panel kept updating.
-* Resting the pointer on a result scrolls that tab to the hit (`fastIndex.hoverJumpDelay`, default 1500 ms) and flashes the line with the theme's `editor.hoverHighlightBackground`, without stealing focus or moving the caret; only the row the pointer still rests on counts, so sweeping never yanks the tab.
+* Resting the pointer on a result scrolls that tab to the hit (`fastIndex.hoverJumpDelay`, default 1500 ms) and **selects that line**; the selection stays until another result is hovered, takes no focus, and is cleared when a new search rewrites the document.
 
 #### Removed: both previews
 
@@ -117,6 +118,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 * `fastIndex.previewHoverDelay` → **`fastIndex.hoverJumpDelay`** (delay before the results tab jumps to a hovered hit).
 * `fastIndex.previewContextLines` → **`fastIndex.resultContextLines`**.
 * New **`fastIndex.autoOpenResults`** (default off).
+* New **`fastIndex.autoSearchFromResults`** (default off): whether selecting a line in the results editor may fill the search box. The webview now also receives all settings when it becomes ready, so `hoverJumpDelay` (and the rest) apply immediately instead of waiting for the settings panel to be opened.
 * All of them relabelled in the panel's ⚙️ settings.
 
 #### Panel access

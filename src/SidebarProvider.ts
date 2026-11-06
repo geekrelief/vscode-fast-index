@@ -63,6 +63,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 followEditor: config.get<boolean>('followEditor') ?? true,
                 persistPinnedSearches: config.get<boolean>('persistPinnedSearches') !== false,
                 autoOpenResults: config.get<boolean>('autoOpenResults') === true,
+                autoSearchFromResults: config.get<boolean>('autoSearchFromResults') === true,
                 pendingFields: this.pendingIndexFields()
             }
         });
@@ -315,6 +316,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 }
                 case 'ready': {
                     this.prefillOnOpen();
+                    // Seed the webview with the stored settings: its hover delay and the
+                    // settings form must not wait for the user to open the panel's settings.
+                    this.sendConfig();
                     this._view?.webview.postMessage({ type: 'locked', value: this.locked });
                     this._view?.webview.postMessage({ type: 'focus' });
                     break;
@@ -461,7 +465,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         resultContextLines: config.get<number>('resultContextLines') ?? 2,
                         followEditor: config.get<boolean>('followEditor') ?? true,
                         persistPinnedSearches: config.get<boolean>('persistPinnedSearches') !== false,
-                        autoOpenResults: config.get<boolean>('autoOpenResults') === true
+                        autoOpenResults: config.get<boolean>('autoOpenResults') === true,
+                        autoSearchFromResults: config.get<boolean>('autoSearchFromResults') === true
                     };
 
                     const clampNumber = (value: unknown, fallback: number, min: number, max: number): number => {
@@ -481,7 +486,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         resultContextLines: clampNumber(input.resultContextLines, current.resultContextLines, 0, 50),
                         followEditor: typeof input.followEditor === 'boolean' ? input.followEditor : current.followEditor,
                         persistPinnedSearches: typeof input.persistPinnedSearches === 'boolean' ? input.persistPinnedSearches : current.persistPinnedSearches,
-                        autoOpenResults: typeof input.autoOpenResults === 'boolean' ? input.autoOpenResults : current.autoOpenResults
+                        autoOpenResults: typeof input.autoOpenResults === 'boolean' ? input.autoOpenResults : current.autoOpenResults,
+                        autoSearchFromResults: typeof input.autoSearchFromResults === 'boolean' ? input.autoSearchFromResults : current.autoSearchFromResults
                     };
 
                     // Each key is written on its own so one failure cannot block the rest.
@@ -608,9 +614,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
         const editor = vscode.window.activeTextEditor;
         if (!editor) return;
-        // Never seed the query from our own generated views (results editor, output, …).
+        // Never seed the query from our own generated views (output, settings, …). The
+        // results editor counts too, unless the user opted into Auto Search from it.
         const scheme = editor.document.uri.scheme;
-        if (scheme === 'fast-index-results' || scheme === 'output' || scheme === 'vscode-settings') return;
+        if (scheme === 'output' || scheme === 'vscode-settings') return;
+        if (scheme === 'fast-index-results'
+            && vscode.workspace.getConfiguration('fastIndex').get<boolean>('autoSearchFromResults') !== true) return;
         if (editor.document.uri.fsPath === '') return;
 
         const document = editor.document;
@@ -1046,6 +1055,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             <label><input type="checkbox" id="confFollowEditor" /> Auto Search: Follows text editor cursor and selection</label>
                         </div>
                         <div class="setting-item setting-check">
+                            <label><input type="checkbox" id="confAutoSearchResults" /> Auto Search from the results window (selecting a line there fills the search box)</label>
+                        </div>
+                        <div class="setting-item setting-check">
                             <label><input type="checkbox" id="confPersistPinned" /> Keep pinned searches between sessions</label>
                         </div>
                         <div class="setting-item setting-check">
@@ -1150,6 +1162,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const pinnedResizer = document.getElementById('pinnedResizer');
                     const confMaxRecent = document.getElementById('confMaxRecent');
                     const confFollowEditor = document.getElementById('confFollowEditor');
+                    const confAutoSearchResults = document.getElementById('confAutoSearchResults');
                     const confPersistPinned = document.getElementById('confPersistPinned');
                     const confHoverDelay = document.getElementById('confHoverDelay');
                     const confAutoOpenResults = document.getElementById('confAutoOpenResults');
@@ -1369,7 +1382,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             persistPinnedSearches: confPersistPinned.checked,
                             hoverJumpDelay: confHoverDelay.value,
                             resultContextLines: confContextLines.value,
-                            autoOpenResults: confAutoOpenResults?.checked === true
+                            autoOpenResults: confAutoOpenResults?.checked === true,
+                            autoSearchFromResults: confAutoSearchResults?.checked === true
                         };
                     }
 
@@ -1398,7 +1412,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             });
                         });
 
-                    [confFollowEditor, confPersistPinned, confAutoOpenResults]
+                    [confFollowEditor, confPersistPinned, confAutoOpenResults, confAutoSearchResults]
                         .filter(Boolean)
                         .forEach(function (field) {
                             field.addEventListener('change', flushConfig);
@@ -2096,6 +2110,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             confHoverDelay.value = message.value.hoverJumpDelay ?? 1500;
                             confContextLines.value = message.value.resultContextLines ?? 2;
                             if (confAutoOpenResults) confAutoOpenResults.checked = message.value.autoOpenResults === true;
+                            if (confAutoSearchResults) confAutoSearchResults.checked = message.value.autoSearchFromResults === true;
                             hoverDelay = Number.isFinite(Number(message.value.hoverJumpDelay)) ? Math.max(0, Number(message.value.hoverJumpDelay)) : 1500;
                             if (typeof message.value.maxRecentSearches === 'number') {
                                 confMaxRecent.value = message.value.maxRecentSearches;
