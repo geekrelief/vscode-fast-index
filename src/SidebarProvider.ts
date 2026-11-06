@@ -662,6 +662,27 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this._view?.webview.postMessage({ type: 'prefill', value });
     }
 
+    /** Replaces one match from the tree view's context menu and refreshes the results. */
+    public async replaceMatchAt(file: string, line: number, replacement: string): Promise<void> {
+        const snapshot = this.lastSnapshot;
+        if (!snapshot) return;
+
+        await this.replaceInFile(file, line, snapshot.query, replacement, !!snapshot.isMatchCase, !!snapshot.isRegex);
+        const files = this.indexer.search(snapshot.query, !!snapshot.isRegex, {
+            include: snapshot.include,
+            exclude: snapshot.exclude
+        });
+        const snippets = await this.getSnippets(files, snapshot.query, !!snapshot.isMatchCase, !!snapshot.isRegex, snapshot.filter);
+        this.lastSnapshot = { ...snapshot, rows: snippets };
+        this._view?.webview.postMessage({ type: 'results', value: snippets });
+        this.onResults?.(this.lastSnapshot, 'search');
+    }
+
+    /** Whether each result should show its matched line (the tree view's description). */
+    public showContextLineEnabled(): boolean {
+        return vscode.workspace.getConfiguration('fastIndex').get<boolean>('showContextLine') !== false;
+    }
+
     private async replaceInFile(file: string, line: number, query: string, replaceText: string, isMatchCase: boolean, isRegex: boolean) {
         const edit = new vscode.WorkspaceEdit();
         await this.applyReplacement(file, line, query, replaceText, edit, isMatchCase, isRegex);
@@ -888,7 +909,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     html, body { height: 100%; }
                     body { font-family: var(--vscode-font-family); font-size: ${this.panelFontSize()}px; padding: 0; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; }
                     .content { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; padding: 8px 10px 10px 10px; box-sizing: border-box; }
-                    #results { flex: 1 1 auto; overflow-y: auto; min-height: 40px; }
+                    /* Results are rendered by the native tree view (fast-index.results); the webview keeps the controls. */
+                    #results, .results-toolbar { display: none !important; }
                     .status-row { display: flex; align-items: center; gap: 6px; font-size: 0.8em; margin-bottom: 8px; opacity: 0.9; }
                     .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--vscode-descriptionForeground); flex: 0 0 auto; }
                     .status-dot.busy { background: var(--vscode-charts-yellow, #cca700); animation: statusPulse 1.1s ease-in-out infinite; }
@@ -1897,39 +1919,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     }
 
                     function renderResults() {
-                        const items = filteredResults();
-                        const hasResults = currentResults.length > 0;
-                        resultsToolbar.style.display = hasResults ? 'flex' : 'none';
-                        expandAllBtn.style.display = viewMode === 'tree' ? '' : 'none';
-                        collapseAllBtn.style.display = viewMode === 'tree' ? '' : 'none';
-                        viewToggleBtn.textContent = viewMode === 'tree' ? '🌳 Tree' : '☰ List';
-
-                        resultsCount.textContent = items.length === currentResults.length
-                            ? currentResults.length + (currentResults.length === 1 ? ' result' : ' results')
-                            : items.length + ' of ' + currentResults.length;
-
+                        // The results are a native tree view now (fast-index.results); this
+                        // webview renders only the controls, so there is nothing to build here.
                         resultsDiv.innerHTML = '';
-                        if (!hasResults) {
-                            resultsDiv.innerHTML = statusState === 'busy' || statusState === 'idle'
-                                ? '<p class="loading-hint" style="opacity: 0.6; font-size: 0.9em;">Index is still loading…</p>'
-                                : '<p style="opacity: 0.6; font-size: 0.9em;">No results found.</p>';
-                            return;
-                        }
-                        if (items.length === 0) {
-                            resultsDiv.innerHTML = '<p style="opacity: 0.6; font-size: 0.9em;">No results match the filter.</p>';
-                            return;
-                        }
-
-                        if (viewMode === 'tree') {
-                            renderTree(buildTree(items), '', 0, resultsDiv);
-                        } else {
-                            items.forEach(item => {
-                                const row = makeResultRow(item, 0, item.fileName);
-                                row.dataset.path = item.fileName;
-                                resultsDiv.appendChild(row);
-                            });
-                        }
                     }
+
 
 
                     viewToggleBtn.addEventListener('click', () => {

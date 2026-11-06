@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { ProjectIndexer } from './indexer';
 import { SidebarProvider } from './SidebarProvider';
 import { ResultsView } from './resultsView';
+import { ResultRow, ResultsTreeProvider } from './resultsTree';
 import { setLogChannel, log } from './log';
 
 /** Remembers that this workspace was indexed successfully, independent of the cache files. */
@@ -49,13 +50,28 @@ export async function activate(context: vscode.ExtensionContext) {
 
     const sidebarProvider = new SidebarProvider(context.extensionUri, indexer, rememberSkipped, context.workspaceState);
 
+    // Results are a real TreeView: VS Code owns expansion, keyboard navigation,
+    // context menus and sticky scroll (workbench.tree.enableStickyScroll).
+    const resultsTree = new ResultsTreeProvider();
+    const resultsTreeView = vscode.window.createTreeView('fast-index.results', {
+        treeDataProvider: resultsTree,
+        showCollapseAll: true
+    });
+
     // The results tab mirrors the sidebar: it re-renders on every new search.
     const resultsView = new ResultsView(
         () => sidebarProvider.getResultsSnapshot() as any,
         () => sidebarProvider.getViewMode()
     );
     context.subscriptions.push({ dispose: () => resultsView.dispose() }, ...resultsView.register());
-    sidebarProvider.onResults = (_snapshot, reason) => {
+    context.subscriptions.push(resultsTreeView, { dispose: () => resultsTree.dispose() });
+    // Selecting a match in the tree scrolls the results tab to the same hit.
+    context.subscriptions.push(resultsTreeView.onDidChangeSelection((event) => {
+        const node = event.selection[0];
+        if (node && node.kind === 'match') resultsView.reveal(node.row.file, node.row.line);
+    }));
+    sidebarProvider.onResults = (snapshot, reason) => {
+        resultsTree.setResults((snapshot?.rows ?? []) as ResultRow[], sidebarProvider.showContextLineEnabled());
         // Only a real search may pop the tab open; re-ordering the panel must not.
         const autoOpen = reason === 'search'
             && vscode.workspace.getConfiguration('fastIndex').get<boolean>('autoOpenResults') === true;
@@ -64,7 +80,42 @@ export async function activate(context: vscode.ExtensionContext) {
     // Resting on a result scrolls the results tab to that hit (no preview pane).
     sidebarProvider.onHover = (file: string, line: number) => resultsView.reveal(file, line);
 
+    // Replacement text for the tree's context menu is remembered between invocations.
+    let lastReplacement = '';
     context.subscriptions.push(
+        vscode.commands.registerCommand('vscode-fast-index.openMatch', async (node: any) => {
+            const row = node?.row;
+            if (!row) return;
+            try {
+                const document = await vscode.workspace.openTextDocument(vscode.Uri.file(row.file));
+                const editor = await vscode.window.showTextDocument(document, { preview: true });
+                const position = new vscode.Position(Math.max(0, Number(row.line) || 0), 0);
+                editor.selection = new vscode.Selection(position, position);
+                editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+            } catch {
+                vscode.window.showInformationMessage('Fast Index: could not open ' + row.file);
+            }
+        }),
+        vscode.commands.registerCommand('vscode-fast-index.replaceMatch', async (node: any) => {
+            const row = node?.row;
+            const snapshot = sidebarProvider.getResultsSnapshot();
+            if (!row || !snapshot) return;
+
+            const value = await vscode.window.showInputBox({
+                title: 'Replace this match',
+                prompt: `${vscode.workspace.asRelativePath(row.file)}:${row.line + 1}`,
+                value: lastReplacement,
+                placeHolder: 'Replacement text'
+            });
+            if (value === undefined) return;
+            lastReplacement = value;
+            await sidebarProvider.replaceMatchAt(row.file, row.line, value);
+        }),
+        vscode.workspace.onDidChangeConfiguration(event => {
+            if (event.affectsConfiguration('fastIndex.showContextLine')) {
+                resultsTree.setShowContextLine(sidebarProvider.showContextLineEnabled());
+            }
+        }),
         vscode.commands.registerCommand('vscode-fast-index.lockResults', () => sidebarProvider.setLock(true)),
         // Editor title button: brings the view forward wherever its container lives —
         // the primary activity bar, or the secondary side bar after the user moved it.

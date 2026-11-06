@@ -3,7 +3,7 @@
   "displayName": "Fast Project Indexer ",
   "description": "Lightning-fast text search for VS Code using a background inverted trigram index.",
   "publisher": "eric",
-  "version": "0.14.5",
+  "version": "0.15.0",
   "engines": {
     "vscode": "^1.108.0"
   },
@@ -44,6 +44,10 @@
           "type": "webview",
           "id": "fast-index.sidebar",
           "name": "Fast Index Search"
+        },
+        {
+          "id": "fast-index.results",
+          "name": "Results"
         }
       ]
     },
@@ -83,12 +87,34 @@
         "icon": "$(book)"
       },
       {
+        "command": "vscode-fast-index.openMatch",
+        "title": "Fast Index: Open Match",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "vscode-fast-index.replaceMatch",
+        "title": "Replace This Match…",
+        "icon": "$(replace)"
+      },
+      {
         "command": "vscode-fast-index.openPanel",
         "title": "Fast Index: Open Search Panel",
         "icon": "$(zap)"
       }
     ],
     "menus": {
+      "view/item/context": [
+        {
+          "command": "vscode-fast-index.replaceMatch",
+          "when": "view == fast-index.results && viewItem == match",
+          "group": "1_modification@1"
+        },
+        {
+          "command": "vscode-fast-index.openMatch",
+          "when": "view == fast-index.results && viewItem == match",
+          "group": "navigation@1"
+        }
+      ],
       "editor/title": [
         {
           "command": "vscode-fast-index.openPanel",
