@@ -66,6 +66,22 @@ export async function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(
         vscode.commands.registerCommand('vscode-fast-index.lockResults', () => sidebarProvider.setLock(true)),
+        // Editor title button: brings the view forward wherever its container lives —
+        // the primary activity bar, or the secondary side bar after the user moved it.
+        vscode.commands.registerCommand('vscode-fast-index.openPanel', async () => {
+            const attempts = ['fast-index.sidebar.focus', 'workbench.view.extension.fast-index-explorer'];
+            for (const command of attempts) {
+                try {
+                    await vscode.commands.executeCommand(command);
+                    return;
+                } catch {
+                    /* try the next one: older hosts may not have every command */
+                }
+            }
+            vscode.window.showInformationMessage(
+                'Fast Index: open the view from the Activity Bar or the Secondary Side Bar.'
+            );
+        }),
         vscode.commands.registerCommand('vscode-fast-index.showLog', () => searchLog.show(true)),
         vscode.commands.registerCommand('vscode-fast-index.unlockResults', () => sidebarProvider.setLock(false)),
         vscode.commands.registerCommand('vscode-fast-index.toggleSettings', () => sidebarProvider.showSettings()),

@@ -3,7 +3,7 @@
   "displayName": "Fast Project Indexer ",
   "description": "Lightning-fast text search for VS Code using a background inverted trigram index.",
   "publisher": "eric",
-  "version": "0.11.2",
+  "version": "0.11.3",
   "engines": {
     "vscode": "^1.108.0"
   },
@@ -81,9 +81,20 @@
         "command": "vscode-fast-index.openResultsInEditor",
         "title": "Fast Index: Open Results in Editor",
         "icon": "$(book)"
+      },
+      {
+        "command": "vscode-fast-index.openPanel",
+        "title": "Fast Index: Open Search Panel",
+        "icon": "$(zap)"
       }
     ],
     "menus": {
+      "editor/title": [
+        {
+          "command": "vscode-fast-index.openPanel",
+          "group": "navigation@9"
+        }
+      ],
       "view/title": [
         {
           "command": "vscode-fast-index.unlockResults",
