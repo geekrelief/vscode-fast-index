@@ -31,7 +31,7 @@ Instead of searching text "on the fly" for every query, the plugin builds an inv
 
 1. Open your project in VS Code.
 2. Click on the **Lightning Bolt (⚡️)** icon in the Activity Bar on the left.
-3. If it's your first time, the plugin will ask to build the index. You can also click the **⚙️** title-bar button and select **Save & Reindex**.
+3. If it's your first time, the plugin will ask to build the index. You can also click the **⚙️** title-bar button and press **Reindex** (settings save themselves as you edit).
 4. Start typing (at least 3 characters) — results with code highlighting will appear instantly. Click on a result to jump directly to the matched line.
 5. Click **▼ Replace** to open the replace panel. Hover over a result and click `Replace` for a surgical fix, or use `Replace All`.
 6. Use the `Aa` or `.*` toggles in the search input to use case-sensitive or RegEx searches.
@@ -39,7 +39,7 @@ Instead of searching text "on the fly" for every query, the plugin builds an inv
 
 ## Configuration
 
-You can customize the extension directly via the **⚙️** title-bar button:
+You can customize the extension directly via the **⚙️** title-bar button. Every field is applied as you edit it — there is no Save button: text and number fields save after a short pause (or immediately on `Enter`), checkboxes save the moment you toggle them.
 
 * **Include Extensions:** Limit indexing to specific file types (e.g., `ts,js,md`). Leave empty to index everything.
 * **Exclude Patterns:** Glob patterns for files/folders to ignore (e.g., `{**/node_modules/**,**/.git/**}`).
@@ -76,7 +76,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog
 
-### 0.8.0 → 0.10.4 — results editor, preview removal, prefill fixes
+### 0.8.0 → 0.10.5 — results editor, preview removal, prefill and settings fixes
 
 #### Results tab in the editor
 
@@ -106,6 +106,8 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 #### Settings
 
+* Every settings field applies **as you edit it**: text and number fields debounce ~350 ms (or flush immediately on `Enter`), checkboxes apply at once. There is no Save button to forget.
+* **Save & Reindex** is now just **Reindex**. Index-affecting edits (include extensions, exclude patterns, max file size) no longer rebuild the index behind your back while you type; the panel shows *Index settings changed — press Reindex to apply them* instead.
 * `fastIndex.previewHoverDelay` → **`fastIndex.hoverJumpDelay`** (delay before the results tab jumps to a hovered hit).
 * `fastIndex.previewContextLines` → **`fastIndex.resultContextLines`**.
 * New **`fastIndex.autoOpenResults`** (default off).

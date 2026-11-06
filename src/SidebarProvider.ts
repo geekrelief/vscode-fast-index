@@ -24,6 +24,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     /** Where the user last put the caret, so opening the panel can tell that from an open at 0,0. */
     private lastUserCursor?: { uri: string; line: number; character: number };
     private lockNoticed = false;
+    /** Set when an index-affecting setting changed; the panel shows the Reindex hint. */
+    private pendingReindex = false;
     private _statusText = 'Starting…';
     private _statusState: 'busy' | 'ready' | 'idle' = 'busy';
 
@@ -58,7 +60,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 resultContextLines: config.get<number>('resultContextLines') ?? 2,
                 followEditor: config.get<boolean>('followEditor') ?? true,
                 persistPinnedSearches: config.get<boolean>('persistPinnedSearches') !== false,
-                autoOpenResults: config.get<boolean>('autoOpenResults') === true
+                autoOpenResults: config.get<boolean>('autoOpenResults') === true,
+                pendingReindex: this.pendingReindex
             }
         });
     }
@@ -324,6 +327,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     break;
                 }
                 case 'rebuildIndex': {
+                    this.pendingReindex = false;
                     vscode.commands.executeCommand('vscode-fast-index.buildIndex');
                     break;
                 }
@@ -398,17 +402,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
                     if (failures.length > 0) {
                         vscode.window.showErrorMessage(`Fast Index: could not save ${failures.join(', ')}`);
-                    } else if (reindexNeeded) {
-                        vscode.window.showInformationMessage('Fast Index settings saved. Rebuilding index…');
-                        void vscode.commands.executeCommand('vscode-fast-index.buildIndex');
-                    } else {
-                        vscode.window.showInformationMessage('Fast Index settings saved.');
                     }
+                    // Settings are saved as the user edits; index-affecting keys only flag
+                    // that a Reindex is due, they never rebuild behind the user's back.
+                    if (reindexNeeded) this.pendingReindex = true;
 
                     // Reflect what is actually stored, and re-run the current search so a new
                     // result limit takes effect immediately.
-                    this._view?.webview.postMessage({ type: 'configData', value: next });
-                    this._view?.webview.postMessage({ type: 'configSaved' });
+                    this._view?.webview.postMessage({
+                        type: 'configData',
+                        value: { ...next, saved: true, pendingReindex: this.pendingReindex }
+                    });
                     break;
                 }
             }
@@ -851,6 +855,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     .tool-btn { padding: 2px 8px; font-size: 0.8em; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); flex: 0 0 auto; }
                     .tool-btn:hover { background: var(--vscode-button-secondaryHoverBackground); }
                     .lock-badge { font-size: 0.8em; padding: 1px 8px; border-radius: 8px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); white-space: nowrap; }
+                    .setting-hint { font-size: 0.85em; opacity: 0.85; margin-top: 4px; }
                     .results-count { margin-left: auto; font-size: 0.8em; opacity: 0.7; }
                     .subsearch input { width: 100%; padding: 4px 6px; margin-bottom: 6px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); box-sizing: border-box; font-size: 0.85em; }
                     .subsearch input:focus { border-color: var(--vscode-focusBorder); outline: none; }
@@ -969,9 +974,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         </div>
                     </div>
                     <div style="display: flex; gap: 5px; margin-top: 5px;">
-                        <button id="saveConfigBtn" style="flex: 1; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground);">Save & Reindex</button>
-                        <button id="forceReindexBtn" style="flex: 1;" title="Rebuild Index without saving settings">🔄 Force Reindex</button>
+                        <button id="reindexBtn" style="flex: 1;" title="Rebuild the index. Settings are saved as you edit them.">🔁 Reindex</button>
                     </div>
+                    <div class="setting-hint" id="reindexHint" style="display: none;">Index settings changed — press Reindex to apply them.</div>
                 </div>
                 
                 <div class="actions">
@@ -1010,8 +1015,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const replaceActions = document.getElementById('replaceActions');
                     const replaceAllBtn = document.getElementById('replaceAllBtn');
                     const settingsPanel = document.getElementById('settingsPanel');
-                    const saveConfigBtn = document.getElementById('saveConfigBtn');
-                    const forceReindexBtn = document.getElementById('forceReindexBtn');
+                    const reindexBtn = document.getElementById('reindexBtn');
+                    const reindexHint = document.getElementById('reindexHint');
                     const mainSearchPanel = document.getElementById('mainSearchPanel');
                     const matchCaseBtn = document.getElementById('matchCaseBtn');
                     const regexBtn = document.getElementById('regexBtn');
@@ -1233,27 +1238,55 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         }
                     }
 
-                    saveConfigBtn.addEventListener('click', () => {
-                        saveConfigBtn.disabled = true;
-                        saveConfigBtn.innerText = "Saving...";
-                        vscode.postMessage({
-                            type: 'saveConfig',
-                            value: {
-                                includeExtensions: confIncludeExt.value,
-                                excludePatterns: confExcludePat.value,
-                                maxFileSizeKB: parseInt(confMaxFileSize.value, 10),
-                                maxResults: parseInt(confMaxResults.value, 10),
-                                maxRecentSearches: parseInt(confMaxRecent.value, 10),
-                                followEditor: confFollowEditor.checked,
-                                persistPinnedSearches: confPersistPinned.checked,
-                                hoverJumpDelay: confHoverDelay.value,
-                                resultContextLines: confContextLines.value,
-                                autoOpenResults: confAutoOpenResults?.checked === true
-                            }
-                        });
-                    });
+                    // Settings are written as you edit them: text fields debounce briefly,
+                    // checkboxes apply at once. There is no Save button to forget.
+                    function collectConfig() {
+                        return {
+                            includeExtensions: confIncludeExt.value,
+                            excludePatterns: confExcludePat.value,
+                            maxFileSizeKB: parseInt(confMaxFileSize.value, 10),
+                            maxResults: parseInt(confMaxResults.value, 10),
+                            maxRecentSearches: parseInt(confMaxRecent.value, 10),
+                            followEditor: confFollowEditor.checked,
+                            persistPinnedSearches: confPersistPinned.checked,
+                            hoverJumpDelay: confHoverDelay.value,
+                            resultContextLines: confContextLines.value,
+                            autoOpenResults: confAutoOpenResults?.checked === true
+                        };
+                    }
 
-                    forceReindexBtn.addEventListener('click', () => {
+                    let configSaveTimer = null;
+
+                    function flushConfig() {
+                        clearTimeout(configSaveTimer);
+                        configSaveTimer = null;
+                        vscode.postMessage({ type: 'saveConfig', value: collectConfig() });
+                    }
+
+                    function saveConfigSoon() {
+                        clearTimeout(configSaveTimer);
+                        configSaveTimer = setTimeout(flushConfig, 350);
+                    }
+
+                    [confIncludeExt, confExcludePat, confMaxFileSize, confMaxResults, confMaxRecent, confHoverDelay, confContextLines]
+                        .filter(Boolean)
+                        .forEach(function (field) {
+                            field.addEventListener('input', saveConfigSoon);
+                            field.addEventListener('keydown', function (event) {
+                                if (event.key === 'Enter') {
+                                    event.preventDefault();
+                                    flushConfig();
+                                }
+                            });
+                        });
+
+                    [confFollowEditor, confPersistPinned, confAutoOpenResults]
+                        .filter(Boolean)
+                        .forEach(function (field) {
+                            field.addEventListener('change', flushConfig);
+                        });
+
+                    reindexBtn.addEventListener('click', () => {
                         vscode.postMessage({ type: 'rebuildIndex' });
                         isSettingsMode = false;
                         settingsPanel.style.display = 'none';
@@ -1945,16 +1978,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                                 recentSearches = recentSearches.slice(0, maxRecent);
                                 persistHistory();
                             }
-                        }
-
-                        if (message.type === 'configSaved') {
-                            saveConfigBtn.disabled = false;
-                            saveConfigBtn.innerText = "Save & Reindex";
-                            isSettingsMode = false;
-                            settingsPanel.style.display = 'none';
-                            mainSearchPanel.style.display = 'flex';
-                                // Settings such as the result limit apply immediately.
-                            if (searchInput.value && (isRegex || searchInput.value.length >= 3)) triggerSearch();
+                            if (reindexHint) {
+                                reindexHint.style.display = message.value.pendingReindex === true ? '' : 'none';
+                            }
+                            // A live-saved setting such as the result limit applies at once.
+                            if (message.value.saved && searchInput.value && (isRegex || searchInput.value.length >= 3)) {
+                                clearTimeout(timeout);
+                                timeout = setTimeout(triggerSearch, 200);
+                            }
                         }
 
                         if (message.type === 'locked') {
