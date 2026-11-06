@@ -196,8 +196,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     public showSettings(): void {
-        // Settings is its own section now: bring it into view.
-        void vscode.commands.executeCommand('fast-index.settings.focus');
+        // Settings is its own section: the button toggles it, so clicking again
+        // collapses it and the sections below move up.
+        void (async () => {
+            for (const command of ['fast-index.settings.toggleVisibility', 'fast-index.settings.focus']) {
+                try {
+                    await vscode.commands.executeCommand(command);
+                    return;
+                } catch {
+                    /* try the next one: older hosts may not register the toggle */
+                }
+            }
+        })();
     }
 
     public togglePinnedSearches(): void {
@@ -1017,7 +1027,16 @@ function soon() {
     saveTimer = setTimeout(flush, 350);
 }
 
-textFields.forEach(function (id) { const el = $(id); if (el) el.addEventListener('input', soon); });
+textFields.forEach(function (id) {
+    const el = $(id);
+    if (!el) return;
+    el.addEventListener('input', soon);
+    el.addEventListener('keydown', function (event) {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        flush();
+    });
+});
 changeFields.forEach(function (id) { const el = $(id); if (el) el.addEventListener('change', flush); });
 
 $('reindexBtn').addEventListener('click', function () { vscode.postMessage({ type: 'rebuildIndex' }); });
@@ -1439,8 +1458,6 @@ vscode.postMessage({ type: 'getCaches' });
             <html lang="en">
             <head>
                 <style>${this.styles()}</style>
-                <!-- Settings render in their own section; this copy stays hidden. -->
-                <style>#settingsPanel { display: none !important; }</style>
             </head>
             <body>
                 <div class="content">
@@ -1489,8 +1506,6 @@ vscode.postMessage({ type: 'getCaches' });
                     </div>
                 </div>
                 
-                ${SidebarProvider.SETTINGS_FORM}
-                
                 <div class="results-toolbar" id="resultsToolbar" style="display: none;">
                     <button id="viewToggleBtn" class="tool-btn" title="Switch between flat list and directory tree">🌳 Tree</button>
                     <button id="expandAllBtn" class="tool-btn" title="Expand every directory down to its files">⊞ Expand all</button>
@@ -1518,23 +1533,10 @@ vscode.postMessage({ type: 'getCaches' });
                     const replaceGroup = document.getElementById('replaceGroup');
                     const replaceActions = document.getElementById('replaceActions');
                     const replaceAllBtn = document.getElementById('replaceAllBtn');
-                    const settingsPanel = document.getElementById('settingsPanel');
-                    const reindexBtn = document.getElementById('reindexBtn');
-                    const reindexHint = document.getElementById('reindexHint');
-                    const reindexText = document.getElementById('reindexText');
-                    const undoIndexBtn = document.getElementById('undoIndexBtn');
-                    const mainSearchPanel = document.getElementById('mainSearchPanel');
                     const matchCaseBtn = document.getElementById('matchCaseBtn');
                     const regexBtn = document.getElementById('regexBtn');
 
                     // Settings Elements
-                    const confIncludeExt = document.getElementById('confIncludeExt');
-                    const confExcludePat = document.getElementById('confExcludePat');
-                    const confMaxFileSize = document.getElementById('confMaxFileSize');
-                    const confMaxResults = document.getElementById('confMaxResults');
-                    const confPanelFont = document.getElementById('confPanelFont');
-                    const confShowContextLine = document.getElementById('confShowContextLine');
-                    const confHoverColor = document.getElementById('confHoverColor');
                     const historyList = document.getElementById('historyList');
                     const historyBtn = document.getElementById('historyBtn');
                     const treeMenu = document.getElementById('treeMenu');
@@ -1542,20 +1544,8 @@ vscode.postMessage({ type: 'getCaches' });
                     const pinnedList = document.getElementById('pinnedList');
                     const pinBtn = document.getElementById('pinBtn');
                     const pinnedResizer = document.getElementById('pinnedResizer');
-                    const confMaxRecent = document.getElementById('confMaxRecent');
-                    const confFollowEditor = document.getElementById('confFollowEditor');
-                    const confAutoSearchResults = document.getElementById('confAutoSearchResults');
-                    const confPersistPinned = document.getElementById('confPersistPinned');
-                    const confAutoOpenResults = document.getElementById('confAutoOpenResults');
-                    const confContextLines = document.getElementById('confContextLines');
                     const scopeInclude = document.getElementById('scopeInclude');
                     const scopeExclude = document.getElementById('scopeExclude');
-                    const cacheListEl = document.getElementById('cacheList');
-                    const cacheSelectAll = document.getElementById('cacheSelectAll');
-                    const cacheSummary = document.getElementById('cacheSummary');
-                    const deleteCachesBtn = document.getElementById('deleteCachesBtn');
-                    const deleteStaleBtn = document.getElementById('deleteStaleBtn');
-                    const reindexCachesBtn = document.getElementById('reindexCachesBtn');
                     const resultsToolbar = document.getElementById('resultsToolbar');
                     const subSearchInput = document.getElementById('subSearchInput');
                     const viewToggleBtn = document.getElementById('viewToggleBtn');
@@ -1583,136 +1573,7 @@ vscode.postMessage({ type: 'getCaches' });
                     let pinnedHeight = 170;
                     let pendingCollapsed = null;
 
-                    let cacheEntries = [];
-                    const selectedCaches = new Set();
 
-                    function formatSize(bytes) {
-                        if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-                        if (bytes >= 1024) return (bytes / 1024).toFixed(0) + ' KB';
-                        return bytes + ' B';
-                    }
-
-                    function formatDate(ms) {
-                        const date = new Date(ms);
-                        if (isNaN(date.getTime())) return 'unknown';
-                        return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) +
-                            ' ' + date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-                    }
-
-                    function updateCacheControls() {
-                        const selected = cacheEntries.filter(entry => selectedCaches.has(entry.file));
-                        const staleEntries = cacheEntries.filter(entry => !entry.exists);
-                        const totalBytes = cacheEntries.reduce((sum, entry) => sum + entry.size, 0);
-                        const selectedBytes = selected.reduce((sum, entry) => sum + entry.size, 0);
-                        const staleNote = staleEntries.length ? ' · ' + staleEntries.length + ' missing' : '';
-
-                        cacheSummary.textContent = (selected.length
-                            ? selected.length + ' of ' + cacheEntries.length + ' · ' + formatSize(selectedBytes) + ' of ' + formatSize(totalBytes)
-                            : cacheEntries.length + ' folder' + (cacheEntries.length === 1 ? '' : 's') + ' · ' + formatSize(totalBytes)) + staleNote;
-
-                        deleteCachesBtn.disabled = selected.length === 0;
-                        deleteCachesBtn.textContent = 'Delete selected';
-
-                        reindexCachesBtn.disabled = selected.length === 0;
-                        reindexCachesBtn.textContent = selected.length ? 'Reindex (' + selected.length + ')' : 'Reindex selected';
-
-                        deleteStaleBtn.disabled = staleEntries.length === 0;
-                        deleteStaleBtn.textContent = staleEntries.length ? 'Delete stale (' + staleEntries.length + ')' : 'Delete stale';
-
-                        cacheSelectAll.checked = cacheEntries.length > 0 && selected.length === cacheEntries.length;
-                        cacheSelectAll.indeterminate = selected.length > 0 && selected.length < cacheEntries.length;
-                        cacheSelectAll.disabled = cacheEntries.length === 0;
-                    }
-
-                    function renderCaches() {
-                        cacheListEl.innerHTML = '';
-                        if (cacheEntries.length === 0) {
-                            const empty = document.createElement('div');
-                            empty.className = 'cache-empty';
-                            empty.textContent = 'No cached folders yet.';
-                            cacheListEl.appendChild(empty);
-                            updateCacheControls();
-                            return;
-                        }
-
-                        cacheEntries.forEach(entry => {
-                            const row = document.createElement('label');
-                            row.className = 'cache-row';
-
-                            const check = document.createElement('input');
-                            check.type = 'checkbox';
-                            check.className = 'cache-check';
-                            check.value = entry.file;
-                            check.checked = selectedCaches.has(entry.file);
-                            check.addEventListener('change', () => {
-                                if (check.checked) selectedCaches.add(entry.file);
-                                else selectedCaches.delete(entry.file);
-                                updateCacheControls();
-                            });
-
-                            const name = document.createElement('span');
-                            name.className = 'cache-name';
-                            name.textContent = entry.root;
-                            name.title = entry.root + '\\nFile: ' + entry.name +
-                                (entry.inUse ? '\\n(used by this workspace)' : '');
-
-                            const meta = document.createElement('span');
-                            meta.className = 'cache-meta';
-                            meta.textContent = formatDate(entry.builtAt) + ' · ' + formatSize(entry.size);
-
-                            row.appendChild(check);
-                            row.appendChild(name);
-                            row.appendChild(meta);
-                            if (!entry.exists) {
-                                const missing = document.createElement('span');
-                                missing.className = 'cache-badge missing';
-                                missing.textContent = 'missing';
-                                missing.title = 'This folder no longer exists (or is unavailable).';
-                                row.appendChild(missing);
-                            }
-                            if (entry.inUse) {
-                                const badge = document.createElement('span');
-                                badge.className = 'cache-badge';
-                                badge.textContent = 'in use';
-                                row.appendChild(badge);
-                            }
-                            cacheListEl.appendChild(row);
-                        });
-
-                        updateCacheControls();
-                    }
-
-                    cacheSelectAll.addEventListener('change', () => {
-                        selectedCaches.clear();
-                        if (cacheSelectAll.checked) {
-                            cacheEntries.forEach(entry => selectedCaches.add(entry.file));
-                        }
-                        renderCaches();
-                    });
-
-                    deleteCachesBtn.addEventListener('click', () => {
-                        if (selectedCaches.size === 0) return;
-                        deleteCachesBtn.disabled = true;
-                        deleteCachesBtn.textContent = 'Deleting…';
-                        vscode.postMessage({ type: 'deleteCaches', files: Array.from(selectedCaches) });
-                    });
-
-                    deleteStaleBtn.addEventListener('click', () => {
-                        if (deleteStaleBtn.disabled) return;
-                        deleteStaleBtn.disabled = true;
-                        deleteStaleBtn.textContent = 'Deleting…';
-                        vscode.postMessage({ type: 'deleteStaleCaches' });
-                    });
-
-                    reindexCachesBtn.addEventListener('click', () => {
-                        const roots = cacheEntries.filter(entry => selectedCaches.has(entry.file)).map(entry => entry.root);
-                        if (roots.length === 0) return;
-                        reindexCachesBtn.disabled = true;
-                        reindexCachesBtn.textContent = 'Reindexing…';
-                        vscode.postMessage({ type: 'reindexCaches', roots });
-                    });
-
-                    let isReplaceMode = false;
                     let isSettingsMode = false;
                     let isMatchCase = false;
                     let isRegex = false;
@@ -1737,96 +1598,6 @@ vscode.postMessage({ type: 'getCaches' });
                         replaceActions.style.display = isReplaceMode ? 'flex' : 'none';
                     }
 
-                    function toggleSettings() {
-                        isSettingsMode = !isSettingsMode;
-                        settingsPanel.style.display = isSettingsMode ? 'flex' : 'none';
-                        mainSearchPanel.style.display = isSettingsMode ? 'none' : 'flex';
-                        document.body.classList.toggle('settings-open', isSettingsMode);
-
-                        if (isSettingsMode) {
-                            vscode.postMessage({ type: 'getConfig' });
-                            vscode.postMessage({ type: 'getCaches' });
-                            // Bring the settings to the top so the whole form is reachable.
-                            requestAnimationFrame(() => settingsPanel.scrollIntoView({ block: 'start' }));
-                        } else {
-                            // Leaving settings: the host asks about index parameters a build has not picked up.
-                            vscode.postMessage({ type: 'settingsClosed' });
-                        }
-                    }
-
-                    // Settings are written as you edit them: text fields debounce briefly,
-                    // checkboxes apply at once. There is no Save button to forget.
-                    function collectConfig() {
-                        return {
-                            includeExtensions: confIncludeExt.value,
-                            excludePatterns: confExcludePat.value,
-                            maxFileSizeKB: parseInt(confMaxFileSize.value, 10),
-                            maxResults: parseInt(confMaxResults.value, 10),
-                            panelFontSize: parseInt(confPanelFont.value, 10),
-                            maxRecentSearches: parseInt(confMaxRecent.value, 10),
-                            followEditor: confFollowEditor.checked,
-                            persistPinnedSearches: confPersistPinned.checked,
-                            resultContextLines: confContextLines.value,
-                            autoOpenResults: confAutoOpenResults?.checked === true,
-                            autoSearchFromResults: confAutoSearchResults?.checked === true,
-                            showContextLine: confShowContextLine?.checked !== false,
-                            hoverHighlightColor: confHoverColor?.value
-                        };
-                    }
-
-                    let configSaveTimer = null;
-
-                    function flushConfig() {
-                        clearTimeout(configSaveTimer);
-                        configSaveTimer = null;
-                        vscode.postMessage({ type: 'saveConfig', value: collectConfig() });
-                    }
-
-                    function saveConfigSoon() {
-                        clearTimeout(configSaveTimer);
-                        configSaveTimer = setTimeout(flushConfig, 350);
-                    }
-
-                    [confIncludeExt, confExcludePat, confMaxFileSize, confMaxResults, confPanelFont, confMaxRecent, confContextLines]
-                        .filter(Boolean)
-                        .forEach(function (field) {
-                            field.addEventListener('input', saveConfigSoon);
-                            field.addEventListener('keydown', function (event) {
-                                if (event.key === 'Enter') {
-                                    event.preventDefault();
-                                    flushConfig();
-                                }
-                            });
-                        });
-
-                    [confFollowEditor, confPersistPinned, confAutoOpenResults, confAutoSearchResults, confShowContextLine, confHoverColor]
-                        .filter(Boolean)
-                        .forEach(function (field) {
-                            field.addEventListener('change', flushConfig);
-                        });
-
-                    // Resize the panel as the number is typed, not just once it is saved.
-                    if (confPanelFont) {
-                        confPanelFont.addEventListener('input', function () {
-                            const size = parseInt(confPanelFont.value, 10);
-                            if (!Number.isFinite(size)) return;
-                            document.body.style.fontSize = Math.max(9, Math.min(24, size)) + 'px';
-                        });
-                    }
-
-                    reindexBtn.addEventListener('click', () => {
-                        vscode.postMessage({ type: 'rebuildIndex' });
-                        isSettingsMode = false;
-                        settingsPanel.style.display = 'none';
-                        mainSearchPanel.style.display = 'flex';
-                    });
-
-                    if (undoIndexBtn) {
-                        undoIndexBtn.addEventListener('click', (event) => {
-                            event.stopPropagation();
-                            vscode.postMessage({ type: 'undoIndexSettings' });
-                        });
-                    }
 
                     replaceAllBtn.addEventListener('click', () => {
                         if (currentResults.length === 0) return;
@@ -2497,21 +2268,10 @@ vscode.postMessage({ type: 'getCaches' });
                         }
 
                         if (message.type === 'configData') {
-                            confIncludeExt.value = message.value.includeExtensions;
-                            confExcludePat.value = message.value.excludePatterns;
-                            confMaxFileSize.value = message.value.maxFileSizeKB;
-                            confMaxResults.value = message.value.maxResults;
                             if (confPanelFont) confPanelFont.value = message.value.panelFontSize ?? 14;
                             if (typeof message.value.panelFontSize === 'number') {
                                 document.body.style.fontSize = Math.max(9, Math.min(24, message.value.panelFontSize)) + 'px';
                             }
-                            confFollowEditor.checked = message.value.followEditor !== false;
-                            confPersistPinned.checked = message.value.persistPinnedSearches !== false;
-                            confContextLines.value = message.value.resultContextLines ?? 2;
-                            if (confAutoOpenResults) confAutoOpenResults.checked = message.value.autoOpenResults === true;
-                            if (confAutoSearchResults) confAutoSearchResults.checked = message.value.autoSearchFromResults === true;
-                            if (confShowContextLine) confShowContextLine.checked = message.value.showContextLine !== false;
-                        if (confHoverColor) confHoverColor.value = message.value.hoverHighlightColor || 'charts.yellow';
                             const showContext = message.value.showContextLine !== false;
                             if (showContext !== showContextLine) {
                                 showContextLine = showContext;
@@ -2523,29 +2283,14 @@ vscode.postMessage({ type: 'getCaches' });
                                 recentSearches = recentSearches.slice(0, maxRecent);
                                 persistHistory();
                             }
-                            if (reindexHint) {
-                                const pendingFields = Array.isArray(message.value.pendingFields) ? message.value.pendingFields : [];
-                                const stale = pendingFields.length > 0;
-                                reindexHint.style.display = stale ? 'flex' : 'none';
-                                if (reindexText) {
-                                    reindexText.textContent = stale
-                                        ? 'Index is stale — changed: ' + pendingFields.join(', ') + '. Reindex to commit them.'
-                                        : '';
-                                }
-                            }
                             // A live-saved setting such as the result limit applies at once.
                             if (message.value.saved && searchInput.value && (isRegex || searchInput.value.length >= 3)) {
                                 clearTimeout(timeout);
                                 timeout = setTimeout(triggerSearch, 200);
                             }
                         }
-
                         if (message.type === 'locked') {
                             setLocked(message.value);
-                        }
-
-                        if (message.type === 'showSettings') {
-                            toggleSettings();
                         }
 
                         if (message.type === 'togglePinned') {
@@ -2563,11 +2308,6 @@ vscode.postMessage({ type: 'getCaches' });
                             restorePinned(message.value || {});
                         }
 
-                        if (message.type === 'cacheList') {
-                            cacheEntries = Array.isArray(message.value) ? message.value : [];
-                            selectedCaches.clear();
-                            renderCaches();
-                        }
 
                         if (message.type === 'focus') {
                             searchInput.focus();

@@ -83,7 +83,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog
 
-### 0.8.0 → 0.20.0 — native results tree, hover jump, pinned section, settings section, results editor and settings fixes
+### 0.8.0 → 0.21.0 — native results tree, hover jump, pinned section, settings section, results editor and settings fixes
 
 #### Results tab in the editor
 
@@ -113,8 +113,8 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 #### Settings section (0.20.0)
 
-* Settings is now **its own section** at the bottom of the Fast Index container, under Pinned Searches, instead of a panel toggled inside the search view. It is a webview view that renders the same form (one shared markup and stylesheet), so every field, the Reindex button, the stale banner and the cached-indexes list behave exactly as before; the section is collapsible like any other, and the ⚙️ title-bar button focuses it.
-* The search panel no longer renders the form at all — its copy is hidden, so opening the container shows Search, Results, Pinned Searches, Settings.
+* Settings is now **its own section** at the bottom of the Fast Index container, under Pinned Searches, instead of a panel toggled inside the search view. It is a webview view that renders the same form (one shared markup and stylesheet), so every field, the Reindex button, the stale banner and the cached-indexes list behave exactly as before; the section is collapsible like any other, and the ⚙️ title-bar button **toggles** it — `fast-index.settings.toggleVisibility` — so clicking it again collapses the section and the sections below move down.
+* The search panel no longer renders the form at all — the markup, the save logic and the cache list were **removed** from it, not just hidden, so opening the container shows Search, Results, Pinned Searches, Settings.
 * Messages from both webviews go through one handler and replies are broadcast to both, so saving a setting updates the section and the panel alike.
 
 #### Settings
