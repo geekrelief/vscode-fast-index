@@ -56,6 +56,9 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
     /** Fired when VS Code resolves a match's tooltip, i.e. when the pointer rests on it. */
     public onHoverMatch?: (row: ResultRow) => void;
 
+    /** Fired with the URIs of the hovered path so the extension can colour them. */
+    public onActivePath?: (uris: string[]) => void;
+
     /** Throttles the refresh that makes a row resolvable again, so hovers cannot loop. */
     private lastHoverRefresh = 0;
     /** Relative path of the file whose rows are currently highlighted, if any. */
@@ -76,6 +79,7 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
         this.activeMatchId = undefined;
         this.nodeByPath.clear();
         this.matchById.clear();
+        this.onActivePath?.([]);
         this.roots = this.build(rows);
         this.emitter.fire(undefined);
     }
@@ -93,9 +97,9 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
     }
 
     /** The file row and its ancestors, for the highlighted path. */
-    private pathNodes(file?: string): TreeNode[] {
+    private pathNodes(file?: string): (DirNode | FileNode)[] {
         if (!file) return [];
-        const nodes: TreeNode[] = [];
+        const nodes: (DirNode | FileNode)[] = [];
         const fileNode = this.nodeByPath.get(file);
         if (fileNode) nodes.push(fileNode);
         const parts = file.split('/');
@@ -127,6 +131,8 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
 
         const fresh: TreeNode[] = [element];
         if (fileChanged) fresh.push(...this.pathNodes(file));
+
+        this.onActivePath?.(this.pathNodes(file).map((node) => this.uriFor(node.path).toString()));
 
         setTimeout(() => {
             for (const node of stale) this.emitter.fire(node);
@@ -186,7 +192,10 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
             item.contextValue = 'file';
             item.description = String(node.rows.length);
             item.tooltip = node.path;
-            item.resourceUri = vscode.Uri.file(node.file);
+            // A private scheme keeps the hover decoration out of the Explorer, which
+            // would otherwise tint the same file everywhere it is shown.
+            item.resourceUri = this.uriFor(node.path);
+            item.iconPath = new vscode.ThemeIcon('file');
             return item;
         }
 
@@ -196,7 +205,13 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
         item.contextValue = 'dir';
         item.description = String(node.count);
         item.tooltip = node.path;
+        item.resourceUri = this.uriFor(node.path);
         return item;
+    }
+
+    /** Scoped URI so file decorations apply to this view only. */
+    private uriFor(path: string): vscode.Uri {
+        return vscode.Uri.from({ scheme: 'fast-index', path: '/' + path });
     }
 
     /**
@@ -287,4 +302,30 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
 /** Icon helper kept separate so the module stays testable without a VS Code host. */
 export function baseName(file: string): string {
     return path.basename(file);
+}
+
+/**
+ * Colours the rows of the hovered path. A file decoration is the only tree API
+ * that gives a row a colour (label highlights only embolden, which a bold theme
+ * font hides), and decorations are keyed by URI - hence the private fast-index:
+ * scheme, which keeps the tint out of the Explorer.
+ */
+export class ActivePathDecorationProvider implements vscode.FileDecorationProvider, vscode.Disposable {
+    private active = new Set<string>();
+    private readonly emitter = new vscode.EventEmitter<undefined>();
+    public readonly onDidChangeFileDecorations = this.emitter.event;
+
+    public setActive(uris: string[]): void {
+        this.active = new Set(uris);
+        this.emitter.fire(undefined);
+    }
+
+    public provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
+        if (!this.active.has(uri.toString())) return undefined;
+        return { color: new vscode.ThemeColor('list.highlightForeground') };
+    }
+
+    public dispose(): void {
+        this.emitter.dispose();
+    }
 }

@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { ProjectIndexer } from './indexer';
 import { SidebarProvider } from './SidebarProvider';
 import { ResultsView } from './resultsView';
-import { ResultRow, ResultsTreeProvider } from './resultsTree';
+import { ActivePathDecorationProvider, ResultRow, ResultsTreeProvider } from './resultsTree';
 import { PinnedSearch, PinsTreeProvider } from './pinsTree';
 import { setLogChannel, log } from './log';
 
@@ -84,6 +84,12 @@ export async function activate(context: vscode.ExtensionContext) {
     );
     context.subscriptions.push({ dispose: () => resultsView.dispose() }, ...resultsView.register());
     context.subscriptions.push(resultsTreeView, { dispose: () => resultsTree.dispose() });
+
+    // Colours the hovered path through file decorations (the only tree API that
+    // sets a row colour), scoped to the fast-index: scheme used by the provider.
+    const activePath = new ActivePathDecorationProvider();
+    resultsTree.onActivePath = (uris) => activePath.setActive(uris);
+    context.subscriptions.push(activePath, vscode.window.registerFileDecorationProvider(activePath));
     // Hover jump: VS Code resolves a match's tooltip only when the pointer rests on
     // the row, which is the one hover signal a TreeView offers. Its timing is
     // workbench.hover.delay; there is no per-widget override.
