@@ -2004,7 +2004,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             chain.sort((a, b) => a - b);
                             // Too deep for the panel: keep the innermost levels, which is where the
                             // current result lives, and drop the outermost ones.
-                            while (chain.length > maxBars) chain.shift();
                             return chain;
                         };
 
@@ -2020,7 +2019,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             if (end >= rows.length) break;
                             const overlap = chain.length * STICKY_BAR_HEIGHT - topOf(rows[end]);
                             if (overlap < STICKY_BAR_HEIGHT) {
-                                push = overlap;
+                                push = Math.max(0, overlap);
                                 break;
                             }
                             // Hand over: the finished file gives its slot to the next one.
@@ -2034,22 +2033,48 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             return;
                         }
 
-                        while (stickyStack.childElementCount > chain.length) stickyStack.lastElementChild.remove();
-                        chain.forEach(function (rowIndex, position) {
-                            const row = rows[rowIndex];
+                        const labelOf = (row) => {
+                            const name = row.querySelector('.dir-name');
+                            return name ? name.textContent : (row.dataset.path || '');
+                        };
+
+                        let entries = chain.map((rowIndex) => ({
+                            label: labelOf(rows[rowIndex]),
+                            depth: depthOf(rows[rowIndex])
+                        }));
+                        let merged = false;
+
+                        // VS Code compresses the overflow into one row (CompressibleStickyScroll
+                        // Delegate) instead of dropping levels: keep the outer bars and merge the
+                        // rest into a single joined path, so nothing - least of all the file -
+                        // disappears.
+                        if (entries.length > maxBars) {
+                            const keep = Math.max(1, maxBars - 1);
+                            const tail = entries.slice(keep);
+                            entries = entries.slice(0, keep);
+                            entries.push({
+                                label: tail.map((entry) => entry.label).join('/'),
+                                depth: tail[0].depth
+                            });
+                            merged = true;
+                        }
+
+                        while (stickyStack.childElementCount > entries.length) stickyStack.lastElementChild.remove();
+                        entries.forEach(function (entry, position) {
                             let bar = stickyStack.children[position];
                             if (!bar) {
                                 bar = document.createElement('div');
                                 bar.className = 'sticky-bar';
                                 stickyStack.appendChild(bar);
                             }
-                            const name = row.querySelector('.dir-name');
-                            bar.textContent = name ? name.textContent : (row.dataset.path || '');
-                            bar.title = row.dataset.path || '';
+                            bar.textContent = entry.label;
+                            bar.title = entry.label;
                             bar.style.top = (position * STICKY_BAR_HEIGHT) + 'px';
-                            bar.style.paddingLeft = (8 + depthOf(row) * 12) + 'px';
-                            const isLast = position === chain.length - 1;
-                            bar.style.transform = isLast && push > 0 ? 'translateY(-' + Math.round(push) + 'px)' : '';
+                            bar.style.paddingLeft = (8 + entry.depth * 12) + 'px';
+                            const isLast = position === entries.length - 1;
+                            bar.style.transform = isLast && !merged && push > 0
+                                ? 'translateY(-' + Math.round(push) + 'px)'
+                                : '';
                         });
                         stickyStack.style.visibility = 'visible';
                     }
