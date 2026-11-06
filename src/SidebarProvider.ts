@@ -986,7 +986,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     .tree-menu-item { padding: 4px 12px; font-size: 0.85em; cursor: pointer; white-space: nowrap; }
                     .tree-menu-item:hover { background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground)); color: var(--vscode-menu-selectionForeground, inherit); }
                     .tree-dir, .tree-file { display: flex; align-items: center; gap: 4px; padding: 2px 4px; font-size: 0.85em; cursor: pointer; user-select: none; }
-                    .tree-file .dir-name { font-weight: normal; color: var(--vscode-textLink-foreground); }
+                    .tree-file .dir-name { font-weight: bold; color: var(--vscode-textLink-foreground); }
                     .tree-file .chevron { opacity: 0.55; }
                     .tree-dir:hover { background: var(--vscode-list-hoverBackground); }
                     .tree-dir .chevron { width: 10px; opacity: 0.7; flex: 0 0 auto; }

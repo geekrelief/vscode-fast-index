@@ -82,7 +82,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog
 
-### 0.8.0 → 0.13.1 — results editor, preview removal, prefill and settings fixes
+### 0.8.0 → 0.13.2 — results editor, preview removal, prefill and settings fixes
 
 #### Results tab in the editor
 
@@ -122,6 +122,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 * New **`fastIndex.autoOpenResults`** (default off).
 * New **`fastIndex.panelFontSize`** (default 14 px, range 9–24): the webview's root font size, so search results, pinned searches and buttons all scale together. The panel is rendered with it and resizes as you type.
 * New **`fastIndex.showContextLine`** (default on): whether each result in the panel shows the matched line of code under its file name. Toggling it re-renders the current results immediately.
+* File names in the tree are now bold, matching the flat list and the directory nodes.
 * New **`fastIndex.autoSearchFromResults`** (default off): whether selecting a line in the results editor may fill the search box. The webview now also receives all settings when it becomes ready, so `hoverJumpDelay` (and the rest) apply immediately instead of waiting for the settings panel to be opened.
 * All of them relabelled in the panel's ⚙️ settings.
 
