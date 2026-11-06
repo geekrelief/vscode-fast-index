@@ -56,7 +56,7 @@ export class ResultsDocumentProvider implements vscode.TextDocumentContentProvid
     }
 }
 
-/** Native search editor serialisation: backslashes and newlines are escaped in the query. */
+/** Native search editor serialization: backslashes and newlines are escaped in the query. */
 const escapeQuery = (value: string): string => value.replace(/\\/g, '\\\\').replace(/\n/g, '\\n');
 
 /**

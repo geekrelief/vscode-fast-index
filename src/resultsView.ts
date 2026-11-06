@@ -224,7 +224,7 @@ export class ResultsView implements vscode.Disposable {
 
     /**
      * A single click on a file or result line peeks into this editor, which is
-     * exactly what the search editor does (`singleClickBehaviour: peekDefinition`).
+     * exactly what the search editor does (`singleClickBehavior: peekDefinition`).
      * The peek itself is a real editor, so it gets the real language support.
      */
     private onSelection(event: vscode.TextEditorSelectionChangeEvent): void {

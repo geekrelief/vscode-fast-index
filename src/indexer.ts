@@ -1335,7 +1335,7 @@ export class ProjectIndexer {
     }
 }
 
-/** Build artefact folders that are never worth indexing, and churn on every build. */
+/** Build artifact folders that are never worth indexing, and churn on every build. */
 const ARTIFACT_SEGMENTS = [
     '/node_modules/',
     '/.git/',

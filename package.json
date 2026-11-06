@@ -3,7 +3,7 @@
   "displayName": "Fast Project Indexer ",
   "description": "Lightning-fast text search for VS Code using a background inverted trigram index.",
   "publisher": "eric",
-  "version": "0.18.0",
+  "version": "0.18.1",
   "engines": {
     "vscode": "^1.108.0"
   },
@@ -270,7 +270,7 @@
             "editorInfo.foreground"
           ],
           "enumDescriptions": [
-            "The theme's list highlight colour (default)",
+            "The theme's list highlight color (default)",
             "Theme chart blue",
             "Theme chart green",
             "Theme chart orange",
@@ -279,7 +279,7 @@
             "Theme chart yellow",
             "The theme's info foreground"
           ],
-          "description": "Theme colour used to highlight the hovered result's file row and its folders in the results tree."
+          "description": "Theme color used to highlight the hovered result's file row and its folders in the results tree."
         },
         "fastIndex.panelFontSize": {
           "type": "number",

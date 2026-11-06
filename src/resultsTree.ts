@@ -42,7 +42,7 @@ interface DirBuilder {
 
 const emptyBuilder = (): DirBuilder => ({ dirs: new Map(), files: new Map() });
 
-/** Theme colour ids offered for the hover highlight; the first is the default. */
+/** Theme color ids offered for the hover highlight; the first is the default. */
 export const HIGHLIGHT_COLORS = [
     'list.highlightForeground',
     'charts.blue',
@@ -68,20 +68,20 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
     /** Fired when VS Code resolves a match's tooltip, i.e. when the pointer rests on it. */
     public onHoverMatch?: (row: ResultRow) => void;
 
-    /** Fired with the URIs of the hovered path so the extension can colour them. */
+    /** Fired with the URIs of the hovered path so the extension can color them. */
     public onActivePath?: (uris: string[]) => void;
 
     /** Throttles the refresh that makes a row resolvable again, so hovers cannot loop. */
     private lastHoverRefresh = 0;
     /** Relative path of the file whose rows are currently highlighted, if any. */
     private activeFile?: string;
-    /** Id of the match row the pointer is on, so it is coloured too. */
+    /** Id of the match row the pointer is on, so it is colored too. */
     private activeMatchId?: string;
     /** Parent links, so a single row can be refreshed instead of the whole tree. */
     private readonly parentOf = new WeakMap<TreeNode, TreeNode>();
     /** Path index, to find the nodes of the active path without walking the tree. */
     private readonly nodeByPath = new Map<string, DirNode | FileNode>();
-    /** Match nodes by id, so a stale colour can be cleared without walking the tree. */
+    /** Match nodes by id, so a stale color can be cleared without walking the tree. */
     private readonly matchById = new Map<string, MatchNode>();
 
     /** Rebuilds the tree; called whenever the panel produces new results. */
@@ -102,7 +102,7 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
         return this.activeFile.startsWith(node.path + '/');
     }
 
-    /** Colour comes from the label's highlights: the theme's list highlight colour. */
+    /** Color comes from the label's highlights: the theme's list highlight color. */
     private labelFor(node: DirNode | FileNode): string | vscode.TreeItemLabel {
         if (!this.isActive(node)) return node.name;
         return { label: node.name, highlights: [[0, node.name.length]] };
@@ -123,10 +123,10 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
     }
 
     /**
-     * Colours the hovered match row, its file and its ancestor directories. Fires
+     * Colors the hovered match row, its file and its ancestor directories. Fires
      * element-scoped refreshes (deferred: the provider contract forbids firing
      * onDidChangeTreeData from inside resolveTreeItem), touching only the rows
-     * whose colour actually changes.
+     * whose color actually changes.
      */
     private markActive(element: MatchNode): void {
         const file = String(element.row.fileName || '');
@@ -317,8 +317,8 @@ export function baseName(file: string): string {
 }
 
 /**
- * Colours the rows of the hovered path. A file decoration is the only tree API
- * that gives a row a colour (label highlights only embolden, which a bold theme
+ * Colors the rows of the hovered path. A file decoration is the only tree API
+ * that gives a row a color (label highlights only embolden, which a bold theme
  * font hides), and decorations are keyed by URI - hence the private fast-index:
  * scheme, which keeps the tint out of the Explorer.
  */
@@ -343,7 +343,7 @@ export class ActivePathDecorationProvider implements vscode.FileDecorationProvid
         return configured && HIGHLIGHT_COLORS.includes(configured) ? configured : HIGHLIGHT_COLORS[0];
     }
 
-    /** Re-reads the colour (the setting changed). */
+    /** Re-reads the color (the setting changed). */
     public refresh(): void {
         this.emitter.fire(undefined);
     }

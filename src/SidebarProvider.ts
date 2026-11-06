@@ -1008,6 +1008,30 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     .setting-item label { font-size: 0.85em; font-weight: bold; opacity: 0.9; }
                     .setting-item input { padding: 5px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); }
                     .setting-item input:focus { border-color: var(--vscode-focusBorder); }
+                    /* Dropdowns are native widgets and ignore the panel theme unless told otherwise. */
+                    .setting-item select {
+                        width: 100%;
+                        box-sizing: border-box;
+                        padding: 5px;
+                        font-family: inherit;
+                        font-size: 1em;
+                        color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
+                        background-color: var(--vscode-dropdown-background, var(--vscode-input-background));
+                        border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border, transparent));
+                        outline: none;
+                        appearance: none;
+                        -webkit-appearance: none;
+                        background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+                        background-position: calc(100% - 14px) calc(50% + 1px), calc(100% - 9px) calc(50% + 1px);
+                        background-size: 5px 5px, 5px 5px;
+                        background-repeat: no-repeat;
+                        padding-right: 24px;
+                    }
+                    .setting-item select:focus { border-color: var(--vscode-focusBorder); }
+                    .setting-item select option {
+                        color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
+                        background-color: var(--vscode-dropdown-background, var(--vscode-input-background));
+                    }
                     
                     .cache-section { display: flex; flex-direction: column; gap: 6px; }
                     .cache-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 0.8em; }
@@ -1131,7 +1155,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             <input type="number" id="confContextLines" min="0" max="50" step="1" />
                         </div>
                         <div class="setting-item">
-                            <label>Hover Highlight Colour</label>
+                            <label>Hover Highlight Color</label>
                             <select id="confHoverColor">
                                 <option value="list.highlightForeground">List highlight (theme default)</option>
                                 <option value="charts.blue">Blue</option>
@@ -1477,7 +1501,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             resultContextLines: confContextLines.value,
                             autoOpenResults: confAutoOpenResults?.checked === true,
                             autoSearchFromResults: confAutoSearchResults?.checked === true,
-                            showContextLine: confShowContextLine?.checked !== false
+                            showContextLine: confShowContextLine?.checked !== false,
+                            hoverHighlightColor: confHoverColor?.value
                         };
                     }
 

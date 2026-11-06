@@ -85,8 +85,8 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push({ dispose: () => resultsView.dispose() }, ...resultsView.register());
     context.subscriptions.push(resultsTreeView, { dispose: () => resultsTree.dispose() });
 
-    // Colours the hovered path through file decorations (the only tree API that
-    // sets a row colour), scoped to the fast-index: scheme used by the provider.
+    // Colors the hovered path through file decorations (the only tree API that
+    // sets a row color), scoped to the fast-index: scheme used by the provider.
     const activePath = new ActivePathDecorationProvider();
     resultsTree.onActivePath = (uris) => activePath.setActive(uris);
     context.subscriptions.push(activePath, vscode.window.registerFileDecorationProvider(activePath));

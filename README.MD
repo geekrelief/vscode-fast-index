@@ -7,7 +7,7 @@ Instead of searching text "on the fly" for every query, the plugin builds an inv
 ## Key Features
 
 * **Instant Search:** Results appear as you type (from 3 characters) with zero lag. The search box takes focus when the panel opens and doubles as an editable combo box: recent searches drop down from the ▾ button on the right, `↑`/`↓` walk them, `Enter` runs the highlighted one. The list size is `fastIndex.maxRecentSearches` (default 20, 0 disables it).
-* **No surprise prefills:** opening the panel never restores the previous query. It seeds the box from an explicit **selection**, or from a caret **you** placed (clicking a word, or typing) — never from the caret a file open leaves at 0,0. While the panel is open, clicking onto a word (or selecting text) keeps the box in sync, and the box stops being "yours" as soon as focus returns to the editor. Toggle the whole behaviour with `fastIndex.followEditor` (or the checkbox in the panel settings), or freeze it temporarily with the 🔒 title-bar lock.
+* **No surprise prefills:** opening the panel never restores the previous query. It seeds the box from an explicit **selection**, or from a caret **you** placed (clicking a word, or typing) — never from the caret a file open leaves at 0,0. While the panel is open, clicking onto a word (or selecting text) keeps the box in sync, and the box stops being "yours" as soon as focus returns to the editor. Toggle the whole behavior with `fastIndex.followEditor` (or the checkbox in the panel settings), or freeze it temporarily with the 🔒 title-bar lock.
 * **Replace keeps the index current:** applying a replacement re-indexes the affected buffers immediately, and searching reads open (dirty) documents, so replaced text disappears from results and new text is findable without saving first.
 * **Results in the editor:** the book icon in the title bar (**Fast Index: Open Results in Editor**) opens the current results as a real editor tab, written in VS Code's own search-editor format so the built-in `search-result` language gives it theme-driven syntax highlighting, Follow-link targets and peek-on-click. It is driven by the panel and refreshed in place. Set `fastIndex.autoOpenResults` to have it open itself after a search.
 * **Results follow into the results editor:** resting the pointer on a match, or selecting it, scrolls the results tab to that exact hit and **selects that line**, so the indicator is a normal text selection that stays until you pick another match. The match's **file row and every ancestor directory are highlighted** in the tree at the same time — the same emphasis the Explorer gives the active file — and the highlight follows the pointer to another file. It never takes focus and never refills the search box (selections made in the results editor are ignored by Auto Search unless you turn on `fastIndex.autoSearchFromResults`). If the tab is closed or hidden nothing happens.
@@ -52,7 +52,7 @@ Three of these settings shape the index itself: **Include Extensions**, **Exclud
 * **Panel Font Size (px):** Text size for the panel — search results, pinned searches, buttons — default `14`, range `9`–`24`. Everything in the panel scales from it, and the change is visible as you type.
 * **Hover jump timing** follows VS Code's own `workbench.hover.delay`; the extension no longer has a delay setting of its own.
 * **Results Context Lines:** Lines shown above and below each match in the results editor (default `2`).
-* **Hover Highlight Colour:** which theme colour marks the hovered result's file and folders in the results tree — the list highlight (default), or the theme's chart blue/green/orange/purple/red/yellow, or its info foreground. Also `fastIndex.hoverHighlightColor`.
+* **Hover Highlight Color:** which theme color marks the hovered result's file and folders in the results tree — the list highlight (default), or the theme's chart blue/green/orange/purple/red/yellow, or its info foreground. Also `fastIndex.hoverHighlightColor`.
 * **Keep pinned searches between sessions:** on/off (default on).
 * **Open the results editor automatically:** on/off (default off, also `fastIndex.autoOpenResults`). When on, a search that finds matches reopens the results tab if you closed it — without stealing focus, so you can keep typing in the panel.
 * **Auto Search: Follows text editor cursor and selection:** on/off.
@@ -83,7 +83,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog
 
-### 0.8.0 → 0.18.0 — native results tree, hover jump, pinned section, results editor and settings fixes
+### 0.8.0 → 0.18.1 — native results tree, hover jump, pinned section, results editor and settings fixes
 
 #### Results tab in the editor
 
@@ -113,7 +113,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 #### Settings
 
-* The panel is grouped into bordered sections — **Search Settings** (result limit, recent searches, hover jump, context lines and the behaviour toggles, including the renamed *Auto Search: Follows text editor cursor and selection*), **Indexing** (include extensions, exclude patterns, max file size, Reindex and the stale banner) and **Cached indexes** — so index-shaping controls are never mixed in with search controls.
+* The panel is grouped into bordered sections — **Search Settings** (result limit, recent searches, hover jump, context lines and the behavior toggles, including the renamed *Auto Search: Follows text editor cursor and selection*), **Indexing** (include extensions, exclude patterns, max file size, Reindex and the stale banner) and **Cached indexes** — so index-shaping controls are never mixed in with search controls.
 * Every settings field applies **as you edit it**: text and number fields debounce ~350 ms (or flush immediately on `Enter`), checkboxes apply at once. There is no Save button to forget.
 * **Save & Reindex** is now just **Reindex**. Index-affecting edits (include extensions, exclude patterns, max file size) no longer rebuild the index behind your back while you type.
 * The panel tracks what the last successful build actually consumed, so it can say the index is **stale** rather than guessing: a banner names the changed fields and offers **Undo changes** to restore the indexed values, next to **Reindex**.
@@ -133,7 +133,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 * **Replace moved to the context menu.** The per-row inline Replace button is gone; right-clicking a match offers **Replace This Match…**, which prompts for the replacement (prefilled with the last value used) and then refreshes the tree and the results editor.
 * The webview still owns the search box, filter, scope fields and settings; its results area is no longer rendered.
 * **Pinned Searches is its own collapsible section** (`fast-index.pins`), so pins can no longer overlap the results. Click a pin to restore it; right-click to **Remove Pinned Search**.
-* **Hover colouring.** Hovering a match colours its file row and every ancestor directory through a **file decoration** (`FileDecoration.color = list.highlightForeground`), which is the only tree API that actually paints a row; `TreeItemLabel.highlights` only emboldens, which bold theme fonts swallow. Rows carry a private `fast-index:` URI so the tint never leaks into the Explorer. The colour moves with the pointer and clears behind it, and only the rows whose colour changed are refreshed, deferred by a tick because `onDidChangeTreeData` must not fire inside `resolveTreeItem`. That is the closest a `TreeView` gets to the Explorer's active-file styling: row backgrounds are not settable by the API, only the label emphasis (or a `FileDecorationProvider`, which would tint the file in the Explorer too).
+* **Hover coloring.** Hovering a match colors its file row and every ancestor directory through a **file decoration** (`FileDecoration.color = list.highlightForeground`), which is the only tree API that actually paints a row; `TreeItemLabel.highlights` only emboldens, which bold theme fonts swallow. Rows carry a private `fast-index:` URI so the tint never leaks into the Explorer. The color moves with the pointer and clears behind it, and only the rows whose color changed are refreshed, deferred by a tick because `onDidChangeTreeData` must not fire inside `resolveTreeItem`. That is the closest a `TreeView` gets to the Explorer's active-file styling: row backgrounds are not settable by the API, only the label emphasis (or a `FileDecorationProvider`, which would tint the file in the Explorer too).
 * **Hover jump works through `resolveTreeItem`.** A `TreeView` has no hover event, but VS Code calls the provider's `resolveTreeItem(item, element)` *when the pointer rests on a row*, because the row's `tooltip` is left undefined and the contract says it is "called on hover to resolve the tooltip if it is undefined". Match rows now never return a tooltip — the popup over the results was pure noise — so the call is used purely as the hover signal that jumps the results editor. VS Code memoises that resolution per row, so the provider refreshes just that row (element-scoped, ~300 ms later and throttled to once a second) to clear the cache and let the next hover fire again; the provider implements `getParent` so VS Code can walk from the row to its parent for that scoped refresh. Folder and file rows keep eager tooltips and never trigger it. Timing is `workbench.hover.delay`; selecting a match still jumps as well.
 * Directory rows carry **no icon** — the tree is a result list, not a file browser. File names are **bold**; directory nodes are semi-bold (600) so the two levels stay distinguishable.
 * New **`fastIndex.showContextLine`** toggle to hide the matched line under each result for a compact file-and-line list.
@@ -142,7 +142,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 * **Replace moved to the title bar.** The in-panel Replace button is gone; a `$(replace)` button in the view title toggles replace mode, which shows the *Replace with…* field under *Skip* plus Replace All.
 * **Settings no longer trap you.** Opening the settings switches the panel body to scrollable (`body.settings-open`), expands it to its content height and scrolls the settings into view, so every group is reachable even when the results section below is tall.
-* **`fastIndex.hoverHighlightColor`** picks the theme colour used for the hover highlight, both as a setting and as a dropdown in the panel settings.
+* **`fastIndex.hoverHighlightColor`** picks the theme color used for the hover highlight, both as a setting and as a dropdown in the panel settings.
 
 #### Panel access
 
@@ -154,7 +154,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 #### Internal
 
-* Split the results tab into `src/ResultsDocumentProvider.ts` (search-editor serialisation, hover line map, depth-first ordering) and `src/resultsView.ts` (tab lifecycle, click-to-peek, hover reveal, panel-driven refresh).
+* Split the results tab into `src/ResultsDocumentProvider.ts` (search-editor serialization, hover line map, depth-first ordering) and `src/resultsView.ts` (tab lifecycle, click-to-peek, hover reveal, panel-driven refresh).
 
 ### 0.3.6 → 0.7.5 — search UI, pins, diagnostics
 
