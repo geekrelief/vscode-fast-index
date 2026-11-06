@@ -74,18 +74,61 @@ The index is built from trigrams: every word of three or more characters contrib
 
 The results tab is a real editor, so its highlighting is the editor's own: no theme parsing or token mapping lives in this extension any more.
 
-## Changelog — current development session
+## Changelog
 
-Everything below landed in one session (0.3.6 → 0.10.4).
+### 0.8.0 → 0.10.4 — results editor, preview removal, prefill fixes
 
-### Search UI
+#### Results tab in the editor
+
+* **Fast Index: Open Results in Editor** writes the results into a virtual document in **the exact format VS Code's own search editor uses**: `# Query:` / `# Flags:` / `# ContextLines:` directives, one `path/to/file.cpp:` block per file, `  12: code` for a match and `  12  code` for context.
+* The document is labelled with the built-in **`search-result` language**, so VS Code's own `search-result` extension supplies everything else instead of this one re-implementing it:
+  * its generated TextMate grammar opens a `meta.resultBlock` on each `file.ext:` line and *embeds that file's grammar* (`source.cpp`, `source.python`, `source.cs`, …) — highlighting is done by the language extensions you have installed, not by a custom lexer;
+  * its `DefinitionProvider` and `DocumentLinkProvider` turn paths and result lines into **Follow-link** targets;
+  * its context/match line decorations give the familiar dimmed-context, bold-match look.
+* A single click on a file or result line runs `editor.action.peekDefinition`, so the **peek opens inside the results tab** rather than jumping to the file and peeking there. The peek body is a real editor for the target file, so language-server features work in it.
+* The panel still owns everything: one stable tab is rewritten in place on every new search (including replacements and Tree/List switches), so query, filters and context lines are always the panel's current ones — there are no controls inside the document.
+* New **`fastIndex.autoOpenResults`** (default off): a search that finds matches reopens the tab if it was closed, with `preserveFocus` so the search box keeps the keyboard. Closing that tab is treated as deliberate — by mouse or by shortcut, it took an explicit action — so the next result-bearing search opens it again.
+* "Is the tab open?" is now judged from the tab strip (`window.tabGroups`), not from loaded documents: a closed virtual document stays loaded in memory, which previously made the tab stop auto-opening after a few searches while the panel kept updating.
+* Resting the pointer on a result scrolls that tab to the hit (`fastIndex.hoverJumpDelay`, default 1500 ms) without stealing focus; only the row the pointer still rests on counts, so sweeping never yanks the tab.
+
+#### Removed: both previews
+
+* The **inline sidebar preview** is gone: `fastIndex.inlinePreview`, its ⚙️ checkbox, its ☰ toggle, the pane markup/CSS and the C/C++/C#/Python tokenizer that fed it.
+* The **bottom-panel preview is gone too**: `PreviewProvider`, `theme.ts`, `media/preview.svg`, the `fast-index-preview-container` view and the *Fast Index: Open Preview Panel* command. A webview cannot host a real editor, so it could never match the editor's look (no semantic tokens, indent guides, folding, ligatures or the real fonts); hovering the real results editor replaced it.
+* The ☰ menu now offers the results editor where the preview used to be.
+
+#### Prefill
+
+* Opening the panel seeds the box from an explicit **selection** or from a caret the user placed (clicked or typed); a caret left by opening a file still does not count.
+* The caret mark and the editor listeners now live for the **whole extension lifetime** instead of inside `resolveWebviewView`: a click made before the panel has ever been opened in that window is remembered, so the first open seeds the box (previously it took a second click).
+* The box counts as user-owned only while the panel has focus, so returning to the editor lets the caret drive the search again even when no `blur` event arrives.
+* A **persisted 🔒 lock** used to disable prefill silently — no message, no log line. The results toolbar now shows a **🔒 Locked** badge, and the output channel logs the reason once per lock.
+
+#### Settings
+
+* `fastIndex.previewHoverDelay` → **`fastIndex.hoverJumpDelay`** (delay before the results tab jumps to a hovered hit).
+* `fastIndex.previewContextLines` → **`fastIndex.resultContextLines`**.
+* New **`fastIndex.autoOpenResults`** (default off).
+* All of them relabelled in the panel's ⚙️ settings.
+
+#### Build hygiene
+
+* `npm run clean` deletes `out/` and runs before `compile` and `vscode:prepublish`: `tsc` never deletes outputs for deleted sources, so 0.10.0 still shipped `PreviewProvider.js`, `syntax.js` and `theme.js`.
+
+#### Internal
+
+* Split the results tab into `src/ResultsDocumentProvider.ts` (search-editor serialisation, hover line map, depth-first ordering) and `src/resultsView.ts` (tab lifecycle, click-to-peek, hover reveal, panel-driven refresh).
+
+### 0.3.6 → 0.7.5 — search UI, pins, diagnostics
+
+#### Search UI
 
 * Moved **Filter these results** directly under the search field, matching its styling (`.input-group`), and made it a **boolean modifier of the search**: a row must match both the query and the filter, applied host-side so the scan keeps going until it has enough matching rows.
 * The filter now survives new searches, `Only in` / `Skip` edits and result refreshes; clearing it re-runs the query.
 * Added a **✕ clear button** to every text field (search, filter, `Only in`, `Skip`, replace) that only appears while the field is hovered and has content.
 * Recent-searches list: fixed entries being clipped/overlapped at the limit (flex rows no longer shrink; the list scrolls), the list no longer opens by itself on focus, and a freshly opened panel starts with an empty box and a closed history.
 
-### Pinned searches
+#### Pinned searches
 
 * New 📌 button that pins the current search — term, `Aa`/`.*`, scope, filter and the collapsed tree branches.
 * Pins render in a scrollable box with a **drag handle** (resizable, height persisted), anchored at the **bottom** of the panel; each row shows the term with its parameters in muted text and a hover ✕.
@@ -93,32 +136,14 @@ Everything below landed in one session (0.3.6 → 0.10.4).
 * Persistence across sessions via `fastIndex.persistPinnedSearches` (workspace storage), toggleable in the panel settings.
 * Pinning reveals the panel; the ☰ menu can show/hide the pinned box.
 
-### Hover → results editor
+#### Follow-editor / prefill
 
-* The bottom-panel **preview was removed**: a webview cannot render a real editor, so it could never match the editor's look (no semantic tokens, indent guides, folding, ligatures or the same fonts). Rather than approximate it, hovering now drives the real editor.
-* Resting on a result for `fastIndex.hoverJumpDelay` (default 1500 ms) scrolls the results tab to that hit and puts the caret there, without stealing focus. Only a row the pointer still rests on counts, so sweeping never yanks the tab.
-* `fastIndex.resultContextLines` (default 2) controls how many lines are shown above and below each match in the results tab.
-
-### Results in the editor
-
-* **Fast Index: Open Results in Editor** writes the results into a virtual document in **the exact format VS Code's own search editor uses**: `# Query:` / `# Flags:` / `# ContextLines:` directives, one `path/to/file.cpp:` block per file, `  12: code` for a match and `  12  code` for context.
-* The document is labelled with the built-in **`search-result` language**, so VS Code's own `search-result` extension supplies everything else instead of this one re-implementing it:
-  * its generated TextMate grammar opens a `meta.resultBlock` on each `file.ext:` line and *embeds that file's grammar* (`source.cpp`, `source.python`, `source.cs`, …) — so highlighting is done by the language extensions you have installed, not by a custom lexer;
-  * its `DefinitionProvider` and `DocumentLinkProvider` turn paths and result lines into **Follow-link** targets;
-  * its context/match line decorations give the familiar dimmed-context, bold-match look.
-* A single click on a file or result line runs `editor.action.peekDefinition`, so the **peek opens inside the results tab** — it no longer jumps to the file and opens a peek there. The peek body is a real editor for the target file, so language-server features work in it.
-* The panel still owns everything: one stable tab is rewritten in place on every new search (including replacements and Tree/List switches), so query, filters and context lines are always the panel's current ones — there are no controls inside the document.
-
-### Follow-editor / prefill
-
-* Opening the panel seeds the box from an explicit **selection** or from a caret the user placed (clicked or typed); a caret left by opening a file does not count.
-* The box only counts as user-owned while the panel has focus — moving focus back to the editor lets the caret drive the search again, even if no `blur` event arrives.
 * While the panel is open, a cursor **on a word** (no ±1 probing) or a selection prefills the box; a cursor in whitespace does not.
 * Opening or switching files no longer prefills (`TextEditorSelectionChangeKind.Command` is ignored; active-editor changes need a selection).
 * Ignored prefills are logged with the reason (`locked`, `box-owned`) and prefills are tagged with their source.
 * Restoring a pin claims the search box and suppresses editor prefills for 2.5 s.
 
-### Reliability and plumbing
+#### Reliability and plumbing
 
 * **Latest search wins:** searches carry a generation number; a newer search cancels the running one between file batches and stale results are never posted.
 * **Fast Index output channel** (`☰ → Show the search log`) recording every search with its trigger, scope, filter and result counts, plus prefill decisions and superseded searches.
@@ -126,7 +151,7 @@ Everything below landed in one session (0.3.6 → 0.10.4).
 * Fixed a crash when opening the panel with the cursor at column 0 (`position.translate(0, -1)` threw "character must be non-negative").
 * Fixed duplicate `viewsContainers` / `views` keys in `package.json`, which caused the panel view to be dropped from the manifest.
 
-### Internal
+#### Internal
 
-* Split out `src/ResultsDocumentProvider.ts` (search-editor-format serialisation, hover line map, depth-first ordering), `src/resultsView.ts` (results tab lifecycle, click-to-peek, hover reveal, panel-driven refresh) and `src/log.ts` (output channel).
 * Pinned searches, lock state and layout stored through the webview/host state as appropriate.
+
