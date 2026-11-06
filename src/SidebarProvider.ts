@@ -979,7 +979,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     .reindex-text { flex: 1; }
                     .link-btn { background: transparent; border: none; padding: 0; cursor: pointer; color: var(--vscode-textLink-foreground); font-size: 1em; text-decoration: underline; }
                     .link-btn:hover { color: var(--vscode-textLink-activeForeground); }
-                    .sticky-path { position: sticky; top: 0; z-index: 6; margin: 0 0 2px 0; padding: 2px 8px; font-size: 0.78em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: var(--vscode-sideBar-background, var(--vscode-editor-background)); color: var(--vscode-descriptionForeground); border-bottom: 1px solid var(--vscode-widget-border); }
+                    .sticky-stack { position: sticky; top: 0; height: 0; z-index: 6; }
+                    .sticky-bar { position: absolute; left: 0; right: 0; height: 20px; box-sizing: border-box; padding: 2px 8px; font-size: 0.78em; font-weight: 600; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: var(--vscode-sideBar-background, var(--vscode-editor-background)); color: var(--vscode-descriptionForeground); border-bottom: 1px solid var(--vscode-widget-border); }
                     .results-count { margin-left: auto; font-size: 0.8em; opacity: 0.7; }
                     .subsearch input { width: 100%; padding: 4px 6px; margin-bottom: 6px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); box-sizing: border-box; font-size: 0.85em; }
                     .subsearch input:focus { border-color: var(--vscode-focusBorder); outline: none; }
@@ -1157,10 +1158,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const searchInput = document.getElementById('searchInput');
                     const replaceInput = document.getElementById('replaceInput');
                     const resultsDiv = document.getElementById('results');
-                    // Sticky breadcrumb: the path of the topmost visible row, pinned while scrolling.
-                    const stickyPath = document.createElement('div');
-                    stickyPath.className = 'sticky-path';
-                    stickyPath.style.visibility = 'hidden';
+                    // Sticky scroll, mirroring VS Code's tree widget: the ancestor chain of the
+                    // top visible row is pinned, one bar per level, and the last bar is pushed
+                    // up as its own subtree scrolls away.
+                    const STICKY_BAR_HEIGHT = 20;
+                    const STICKY_MAX_BARS = 6;
+                    const stickyStack = document.createElement('div');
+                    stickyStack.className = 'sticky-stack';
+                    stickyStack.style.visibility = 'hidden';
                     const toggleReplaceBtn = document.getElementById('toggleReplaceBtn');
                     const replaceGroup = document.getElementById('replaceGroup');
                     const replaceActions = document.getElementById('replaceActions');
@@ -1837,6 +1842,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             const row = document.createElement('div');
                             row.className = 'tree-dir';
                             row.dataset.path = path;
+                            row.dataset.depth = String(depth);
                             row.style.paddingLeft = (4 + depth * 12) + 'px';
                             row.innerHTML = '<span class="chevron">' + (isCollapsed ? '▸' : '▾') + '</span>' +
                                 '<span class="dir-name">' + escapeHtml(name) + '</span>' +
@@ -1879,6 +1885,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             const row = document.createElement('div');
                             row.className = 'tree-file';
                             row.dataset.path = filePath;
+                            row.dataset.depth = String(depth);
                             row.style.paddingLeft = (4 + depth * 12) + 'px';
                             row.innerHTML = '<span class="chevron">' + (isCollapsed ? '▸' : '▾') + '</span>' +
                                 '<span class="dir-name">' + escapeHtml(name) + '</span>' +
@@ -1895,6 +1902,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                                 group.forEach(item => {
                                     const row = makeResultRow(item, depth + 1, '');
                                     row.dataset.path = filePath;
+                                    row.dataset.depth = String(depth + 1);
                                     container.appendChild(row);
                                 });
                             }
@@ -1914,8 +1922,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             : items.length + ' of ' + currentResults.length;
 
                         resultsDiv.innerHTML = '';
-                        stickyPath.style.visibility = 'hidden';
-                        stickyPath.textContent = '';
+                        stickyStack.style.visibility = 'hidden';
+                        stickyStack.textContent = '';
                         if (!hasResults) {
                             resultsDiv.innerHTML = statusState === 'busy' || statusState === 'idle'
                                 ? '<p class="loading-hint" style="opacity: 0.6; font-size: 0.9em;">Index is still loading…</p>'
@@ -1927,48 +1935,105 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             return;
                         }
 
-                        resultsDiv.appendChild(stickyPath);
+                        resultsDiv.appendChild(stickyStack);
                         if (viewMode === 'tree') {
                             renderTree(buildTree(items), '', 0, resultsDiv);
                         } else {
                             items.forEach(item => {
                                 const row = makeResultRow(item, 0, item.fileName);
                                 row.dataset.path = item.fileName;
+                                row.dataset.depth = '0';
                                 resultsDiv.appendChild(row);
                             });
                         }
                         scheduleStickyUpdate();
                     }
 
-                    // Pins the path of the topmost visible row while the results scroll.
+                    // Mirrors VS Code's StickyScrollController for trees: walk the ancestor chain
+                    // of the top visible row, stack one bar per level, and slide the last bar out
+                    // as the end of its subtree reaches the stack.
                     let stickyFrame = 0;
 
-                    function updateStickyPath() {
+                    function updateStickyStack() {
                         stickyFrame = 0;
-                        if (!stickyPath.parentNode || resultsDiv.scrollTop < 4) {
-                            stickyPath.style.visibility = 'hidden';
+                        const rows = Array.prototype.slice.call(resultsDiv.querySelectorAll('[data-depth]'));
+                        if (!rows.length || resultsDiv.scrollTop < 4) {
+                            stickyStack.style.visibility = 'hidden';
                             return;
                         }
-                        const rows = resultsDiv.querySelectorAll('[data-path]');
-                        const top = resultsDiv.getBoundingClientRect().top + 1;
-                        let current = '';
+
+                        const container = resultsDiv.getBoundingClientRect();
+                        const viewTop = container.top;
+                        const viewBottom = container.bottom;
+                        const maxStackHeight = Math.max(STICKY_BAR_HEIGHT, (viewBottom - viewTop) * 0.4);
+
+                        // First row still reaching into the viewport.
+                        let first = -1;
                         for (let index = 0; index < rows.length; index++) {
-                            if (rows[index].getBoundingClientRect().bottom > top) {
-                                current = rows[index].dataset.path || '';
+                            if (rows[index].getBoundingClientRect().bottom > viewTop + 1) {
+                                first = index;
                                 break;
                             }
                         }
-                        if (!current) {
-                            stickyPath.style.visibility = 'hidden';
+                        if (first < 0) {
+                            stickyStack.style.visibility = 'hidden';
                             return;
                         }
-                        stickyPath.textContent = current;
-                        stickyPath.style.visibility = 'visible';
+
+                        const chain = [];
+                        let depth = Number(rows[first].dataset.depth);
+                        for (let index = first - 1; index >= 0 && chain.length < STICKY_MAX_BARS; index--) {
+                            const candidate = Number(rows[index].dataset.depth);
+                            if (candidate < depth) {
+                                chain.unshift(rows[index]);
+                                depth = candidate;
+                            }
+                        }
+
+                        // A parent that starts the viewport and is still open is itself pinned.
+                        const nextDepth = first + 1 < rows.length ? Number(rows[first + 1].dataset.depth) : -1;
+                        if (chain.length < STICKY_MAX_BARS && nextDepth > Number(rows[first].dataset.depth)) {
+                            chain.push(rows[first]);
+                        }
+                        while (chain.length > 0 && chain.length * STICKY_BAR_HEIGHT > maxStackHeight) chain.shift();
+                        if (chain.length === 0) {
+                            stickyStack.style.visibility = 'hidden';
+                            return;
+                        }
+
+                        // How far the deepest bar has been pushed by the end of its subtree.
+                        const deepest = chain[chain.length - 1];
+                        const deepestIndex = rows.indexOf(deepest);
+                        const deepestDepth = Number(deepest.dataset.depth);
+                        let endIndex = deepestIndex + 1;
+                        while (endIndex < rows.length && Number(rows[endIndex].dataset.depth) > deepestDepth) endIndex++;
+                        const subtreeEnd = endIndex < rows.length
+                            ? rows[endIndex].getBoundingClientRect().top - viewTop
+                            : Number.POSITIVE_INFINITY;
+                        const stackBottom = chain.length * STICKY_BAR_HEIGHT;
+                        const push = subtreeEnd < stackBottom ? stackBottom - Math.max(0, subtreeEnd) : 0;
+
+                        while (stickyStack.childElementCount > chain.length) stickyStack.lastElementChild.remove();
+                        chain.forEach(function (row, index) {
+                            let bar = stickyStack.children[index];
+                            if (!bar) {
+                                bar = document.createElement('div');
+                                bar.className = 'sticky-bar';
+                                stickyStack.appendChild(bar);
+                            }
+                            const name = row.querySelector('.dir-name');
+                            bar.textContent = name ? name.textContent : (row.dataset.path || '');
+                            bar.title = row.dataset.path || '';
+                            bar.style.top = (index * STICKY_BAR_HEIGHT) + 'px';
+                            const last = index === chain.length - 1;
+                            bar.style.transform = last && push > 0 ? 'translateY(-' + Math.round(push) + 'px)' : '';
+                        });
+                        stickyStack.style.visibility = 'visible';
                     }
 
                     function scheduleStickyUpdate() {
                         if (stickyFrame) cancelAnimationFrame(stickyFrame);
-                        stickyFrame = requestAnimationFrame(updateStickyPath);
+                        stickyFrame = requestAnimationFrame(updateStickyStack);
                     }
 
                     resultsDiv.addEventListener('scroll', scheduleStickyUpdate, { passive: true });
