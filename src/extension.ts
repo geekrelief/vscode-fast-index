@@ -54,7 +54,12 @@ export async function activate(context: vscode.ExtensionContext) {
         () => sidebarProvider.getViewMode()
     );
     context.subscriptions.push({ dispose: () => resultsView.dispose() }, ...resultsView.register());
-    sidebarProvider.onResults = () => void resultsView.refresh();
+    sidebarProvider.onResults = (_snapshot, reason) => {
+        // Only a real search may pop the tab open; re-ordering the panel must not.
+        const autoOpen = reason === 'search'
+            && vscode.workspace.getConfiguration('fastIndex').get<boolean>('autoOpenResults') === true;
+        void resultsView.sync(autoOpen);
+    };
     // The preview also lives in a bottom panel, next to the terminal.
     const previewProvider = new PreviewProvider(context.extensionUri);
     sidebarProvider.onPreview = (file: string, line: number, query: string, isRegex: boolean, isMatchCase: boolean) => {

@@ -55,7 +55,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 previewContextLines: config.get<number>('previewContextLines') ?? 2,
                 inlinePreview: config.get<boolean>('inlinePreview') === true,
                 followEditor: config.get<boolean>('followEditor') ?? true,
-                persistPinnedSearches: config.get<boolean>('persistPinnedSearches') !== false
+                persistPinnedSearches: config.get<boolean>('persistPinnedSearches') !== false,
+                autoOpenResults: config.get<boolean>('autoOpenResults') === true
             }
         });
     }
@@ -89,7 +90,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     public onPreview?: (file: string, line: number, query: string, isRegex: boolean, isMatchCase: boolean) => void;
 
     /** Set by the extension so the results tab can re-render with the panel. */
-    public onResults?: (snapshot: { query: string; isRegex: boolean; isMatchCase: boolean; filter: string; include: string[]; exclude: string[]; rows: any[] }) => void;
+    public onResults?: (snapshot: { query: string; isRegex: boolean; isMatchCase: boolean; filter: string; include: string[]; exclude: string[]; rows: any[] }, reason: 'search' | 'layout') => void;
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -186,7 +187,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     log(`search "${value}" reason=${reason || 'unknown'} case=${!!isMatchCase} regex=${!!isRegex} include=[${(include || []).join(',')}] exclude=[${(exclude || []).join(',')}] filter="${filter || ''}" -> ${files.length} files, ${snippets.length} rows`);
                     this.lastSnapshot = { query: value, isRegex: !!isRegex, isMatchCase: !!isMatchCase, filter: filter || '', include: include || [], exclude: exclude || [], rows: snippets };
                     this._view?.webview.postMessage({ type: 'results', value: snippets });
-                    this.onResults?.(this.lastSnapshot);
+                    this.onResults?.(this.lastSnapshot, 'search');
                     break;
                 }
                 case 'replaceSingle': {
@@ -196,7 +197,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const snippets = await this.getSnippets(files, query, isMatchCase, isRegex, filter);
                     this._view?.webview.postMessage({ type: 'results', value: snippets });
                     this.lastSnapshot = { query, isRegex: !!isRegex, isMatchCase: !!isMatchCase, filter: filter || '', include: include || [], exclude: exclude || [], rows: snippets };
-                    this.onResults?.(this.lastSnapshot);
+                    this.onResults?.(this.lastSnapshot, 'search');
                     break;
                 }
                 case 'replaceAll': {
@@ -206,7 +207,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const snippets = await this.getSnippets(files, query, isMatchCase, isRegex, filter);
                     this._view?.webview.postMessage({ type: 'results', value: snippets });
                     this.lastSnapshot = { query, isRegex: !!isRegex, isMatchCase: !!isMatchCase, filter: filter || '', include: include || [], exclude: exclude || [], rows: snippets };
-                    this.onResults?.(this.lastSnapshot);
+                    this.onResults?.(this.lastSnapshot, 'search');
                     break;
                 }
                 case 'ready': {
@@ -257,7 +258,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 case 'viewMode': {
                     this.viewMode = data.value === 'flat' ? 'flat' : 'tree';
                     // The results tab renders the same order the panel shows.
-                    if (this.lastSnapshot) this.onResults?.(this.lastSnapshot);
+                    if (this.lastSnapshot) this.onResults?.(this.lastSnapshot, 'layout');
                     break;
                 }
                 case 'lock': {
@@ -372,7 +373,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         previewContextLines: config.get<number>('previewContextLines') ?? 2,
                         inlinePreview: config.get<boolean>('inlinePreview') === true,
                         followEditor: config.get<boolean>('followEditor') ?? true,
-                        persistPinnedSearches: config.get<boolean>('persistPinnedSearches') !== false
+                        persistPinnedSearches: config.get<boolean>('persistPinnedSearches') !== false,
+                        autoOpenResults: config.get<boolean>('autoOpenResults') === true
                     };
 
                     const clampNumber = (value: unknown, fallback: number, min: number, max: number): number => {
@@ -392,7 +394,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         previewContextLines: clampNumber(input.previewContextLines, current.previewContextLines, 0, 50),
                         inlinePreview: typeof input.inlinePreview === 'boolean' ? input.inlinePreview : current.inlinePreview,
                         followEditor: typeof input.followEditor === 'boolean' ? input.followEditor : current.followEditor,
-                        persistPinnedSearches: typeof input.persistPinnedSearches === 'boolean' ? input.persistPinnedSearches : current.persistPinnedSearches
+                        persistPinnedSearches: typeof input.persistPinnedSearches === 'boolean' ? input.persistPinnedSearches : current.persistPinnedSearches,
+                        autoOpenResults: typeof input.autoOpenResults === 'boolean' ? input.autoOpenResults : current.autoOpenResults
                     };
 
                     // Each key is written on its own so one failure cannot block the rest.
@@ -954,6 +957,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     <div class="setting-item setting-check">
                         <label><input type="checkbox" id="confInlinePreview" /> Show the inline preview in this panel (off by default — use the Preview Panel)</label>
                     </div>
+                    <div class="setting-item setting-check">
+                        <label><input type="checkbox" id="confAutoOpenResults" /> Open the results editor automatically when a search finds matches</label>
+                    </div>
                     <div class="setting-item">
                         <label>Preview Hover Delay (ms, 0 = instant)</label>
                         <input type="number" id="confPreviewDelay" min="0" step="50" />
@@ -1050,6 +1056,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const confPersistPinned = document.getElementById('confPersistPinned');
                     const confPreviewDelay = document.getElementById('confPreviewDelay');
                     const confInlinePreview = document.getElementById('confInlinePreview');
+                    const confAutoOpenResults = document.getElementById('confAutoOpenResults');
                     const confContextLines = document.getElementById('confContextLines');
                     const scopeInclude = document.getElementById('scopeInclude');
                     const scopeExclude = document.getElementById('scopeExclude');
@@ -1265,7 +1272,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                                 persistPinnedSearches: confPersistPinned.checked,
                                 previewHoverDelay: confPreviewDelay.value,
                                 previewContextLines: confContextLines.value,
-                                inlinePreview: confInlinePreview.checked
+                                inlinePreview: confInlinePreview.checked,
+                                autoOpenResults: confAutoOpenResults?.checked === true
                             }
                         });
                     });
@@ -2134,6 +2142,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             confPreviewDelay.value = message.value.previewHoverDelay ?? 1500;
                             confContextLines.value = message.value.previewContextLines ?? 2;
                             confInlinePreview.checked = message.value.inlinePreview === true;
+                            if (confAutoOpenResults) confAutoOpenResults.checked = message.value.autoOpenResults === true;
                             inlinePreview = message.value.inlinePreview === true;
                             if (!inlinePreview) previewPane.style.display = 'none';
                             previewDelay = Number.isFinite(Number(message.value.previewHoverDelay)) ? Math.max(0, Number(message.value.previewHoverDelay)) : 1500;

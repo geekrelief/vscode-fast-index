@@ -24,6 +24,8 @@ export class ResultsView implements vscode.Disposable {
     private readonly disposables: vscode.Disposable[] = [];
     private building = false;
     private rebuildQueued = false;
+    private opening = false;
+    private syncQueued = false;
     private lastPeek?: { line: number; version: number; at: number };
 
     public constructor(
@@ -47,18 +49,55 @@ export class ResultsView implements vscode.Disposable {
     }
 
     /** Opens the results tab, or brings the existing one forward. */
-    public async open(): Promise<void> {
+    public async open(options?: { preserveFocus?: boolean }): Promise<void> {
+        if (this.opening) return;
         const snapshot = this.getSnapshot();
         if (!snapshot || snapshot.rows.length === 0) {
             vscode.window.showInformationMessage('Fast Index: run a search first.');
             return;
         }
 
-        this.provider.setText(await this.render(snapshot));
+        this.opening = true;
+        try {
+            this.provider.setText(await this.render(snapshot));
 
-        const document = await vscode.workspace.openTextDocument(ResultsDocumentProvider.uri);
-        await this.ensureLanguage(document);
-        await vscode.window.showTextDocument(document, { preview: false });
+            const document = await vscode.workspace.openTextDocument(ResultsDocumentProvider.uri);
+            await this.ensureLanguage(document);
+            await vscode.window.showTextDocument(document, {
+                preview: false,
+                preserveFocus: options?.preserveFocus === true
+            });
+        } finally {
+            this.opening = false;
+        }
+    }
+
+    /**
+     * Called whenever the panel produces new results or changes its layout.
+     * `autoOpen` mirrors the `fastIndex.autoOpenResults` setting: when the tab
+     * was closed, a search opens it again — without stealing focus from the
+     * panel the user is typing in.
+     */
+    public async sync(autoOpen: boolean): Promise<void> {
+        if (this.opening) {
+            // A newer search landed while the tab was being built: refresh once it exists.
+            this.syncQueued = true;
+            return;
+        }
+        if (this.isOpen()) {
+            await this.refresh();
+            return;
+        }
+        if (!autoOpen) return;
+
+        const snapshot = this.getSnapshot();
+        if (!snapshot || snapshot.rows.length === 0) return;
+
+        await this.open({ preserveFocus: true });
+        if (this.syncQueued) {
+            this.syncQueued = false;
+            await this.sync(false);
+        }
     }
 
     /** Called whenever the panel produces new results or changes its layout. */

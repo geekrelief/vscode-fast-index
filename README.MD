@@ -50,6 +50,7 @@ You can customize the extension directly via the **⚙️** title-bar button:
 * **Preview Context Lines:** Lines shown above and below a match (default `2`).
 * **Show the inline preview:** on/off (default off — the bottom Preview Panel is the primary surface).
 * **Keep pinned searches between sessions:** on/off (default on).
+* **Open the results editor automatically:** on/off (default off, also `fastIndex.autoOpenResults`). When on, a search that finds matches reopens the results tab if you closed it — without stealing focus, so you can keep typing in the panel.
 * **Follow editor selection / word under cursor:** on/off.
 * **Cached indexes:** The settings panel lists every cached workspace folder with its build date and size. Tick the ones you want to drop (or **Select all**) and press **Delete selected**; a confirmation dialog is shown before anything is deleted. **Reindex selected** re-scans only the ticked folders and leaves the other caches untouched. Caches whose folder no longer exists are marked **missing**, and **Delete stale** removes all of them in one confirmed step. A deleted folder is re-indexed only when you run **Fast Index: Build Project Index**.
 
@@ -77,7 +78,7 @@ The preview surfaces share `src/theme.ts`, which resolves `workbench.colorTheme`
 
 ## Changelog — current development session
 
-Everything below landed in one session (0.3.6 → 0.9.0).
+Everything below landed in one session (0.3.6 → 0.9.1).
 
 ### Search UI
 
