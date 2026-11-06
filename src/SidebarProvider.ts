@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ProjectIndexer, isFileNameMatch, fileNameRank, SearchScope } from './indexer';
+import { HIGHLIGHT_COLORS } from './resultsTree';
 import { log } from './log';
 
 export interface PinnedSearch {
@@ -42,6 +43,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     private pinned: PinnedSearch[] = [];
+    /** Replace mode is toggled from the view title bar. */
+    private replaceMode = false;
+
+
+    /** Flips replace mode (title-bar button) and tells the webview. */
+    public toggleReplace(): void {
+        this.replaceMode = !this.replaceMode;
+        this._view?.webview.postMessage({ type: 'replaceMode', value: this.replaceMode });
+    }
     private locked = false;
     private readonly disposables: vscode.Disposable[] = [];
     private viewMode: 'tree' | 'flat' = 'tree';
@@ -73,6 +83,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 autoOpenResults: config.get<boolean>('autoOpenResults') === true,
                 autoSearchFromResults: config.get<boolean>('autoSearchFromResults') === true,
                 showContextLine: config.get<boolean>('showContextLine') !== false,
+                hoverHighlightColor: config.get<string>('hoverHighlightColor') || 'list.highlightForeground',
+                replaceMode: this.replaceMode,
                 pendingFields: this.pendingIndexFields()
             }
         });
@@ -500,7 +512,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         persistPinnedSearches: config.get<boolean>('persistPinnedSearches') !== false,
                         autoOpenResults: config.get<boolean>('autoOpenResults') === true,
                         autoSearchFromResults: config.get<boolean>('autoSearchFromResults') === true,
-                        showContextLine: config.get<boolean>('showContextLine') !== false
+                        showContextLine: config.get<boolean>('showContextLine') !== false,
+                        hoverHighlightColor: config.get<string>('hoverHighlightColor') || 'list.highlightForeground'
                     };
 
                     const clampNumber = (value: unknown, fallback: number, min: number, max: number): number => {
@@ -522,7 +535,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         persistPinnedSearches: typeof input.persistPinnedSearches === 'boolean' ? input.persistPinnedSearches : current.persistPinnedSearches,
                         autoOpenResults: typeof input.autoOpenResults === 'boolean' ? input.autoOpenResults : current.autoOpenResults,
                         autoSearchFromResults: typeof input.autoSearchFromResults === 'boolean' ? input.autoSearchFromResults : current.autoSearchFromResults,
-                        showContextLine: typeof input.showContextLine === 'boolean' ? input.showContextLine : current.showContextLine
+                        showContextLine: typeof input.showContextLine === 'boolean' ? input.showContextLine : current.showContextLine,
+                        hoverHighlightColor: HIGHLIGHT_COLORS.includes(String(input.hoverHighlightColor))
+                            ? String(input.hoverHighlightColor)
+                            : current.hoverHighlightColor
                     };
 
                     // Each key is written on its own so one failure cannot block the rest.
@@ -929,6 +945,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 <style>
                     html, body { height: 100%; }
                     body { font-family: var(--vscode-font-family); font-size: ${this.panelFontSize()}px; padding: 0; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; }
+                    /* Settings are tall: let the whole panel scroll so every group is reachable. */
+                    body.settings-open { overflow-y: auto; }
+                    body.settings-open .content { flex: 0 0 auto; min-height: 0; padding-bottom: 24px; }
                     .content { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; padding: 8px 10px 10px 10px; box-sizing: border-box; }
                     /* Results are rendered by the native tree view (fast-index.results); the webview keeps the controls. */
                     #results, .results-toolbar { display: none !important; }
@@ -1071,12 +1090,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             <span class="clear-btn" title="Clear">✕</span>
                         </div>
                     </div>
-                    <div class="input-group" id="replaceGroup" style="display: none;">
-                        <div class="clearable">
-                            <input type="text" id="replaceInput" placeholder="Replace with..." />
-                            <span class="clear-btn" title="Clear">✕</span>
-                        </div>
-                    </div>
                     <div class="scope-group">
                         <div class="clearable">
                             <input type="text" id="scopeInclude" class="scope-input" title="Only search files matching these extensions, names or folders (partial matches; comma separated). Use .h for an exact extension." placeholder="Only in: cpp, h, Char, Source/Game" />
@@ -1086,6 +1099,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             <input type="text" id="scopeExclude" class="scope-input" title="Skip files matching these extensions, names or folders (partial matches; comma separated)." placeholder="Skip: Intermediate, Test, .ini" />
                             <span class="clear-btn" title="Clear">✕</span>
                         </div>
+                    </div>
+                    <div class="input-group" id="replaceGroup" style="display: none;">
+                        <div class="clearable">
+                            <input type="text" id="replaceInput" placeholder="Replace with..." />
+                            <span class="clear-btn" title="Clear">✕</span>
+                        </div>
+                    </div>
+                    <div class="actions" id="replaceActions" style="display: none;">
+                        <button id="replaceAllBtn">Replace All</button>
                     </div>
                 </div>
                 
@@ -1107,6 +1129,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         <div class="setting-item">
                             <label>Results Context Lines (above and below)</label>
                             <input type="number" id="confContextLines" min="0" max="50" step="1" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Hover Highlight Colour</label>
+                            <select id="confHoverColor">
+                                <option value="list.highlightForeground">List highlight (theme default)</option>
+                                <option value="charts.blue">Blue</option>
+                                <option value="charts.green">Green</option>
+                                <option value="charts.orange">Orange</option>
+                                <option value="charts.purple">Purple</option>
+                                <option value="charts.red">Red</option>
+                                <option value="charts.yellow">Yellow</option>
+                                <option value="editorInfo.foreground">Info</option>
+                            </select>
                         </div>
                         <div class="setting-item setting-check">
                             <label><input type="checkbox" id="confShowContextLine" /> Show the hit's context line under each result</label>
@@ -1164,13 +1199,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     </section>
                 </div>
                 
-                <div class="actions">
-                    <button id="toggleReplaceBtn" title="Toggle Replace Mode">▼ Replace</button>
-                </div>
-                <div class="actions" id="replaceActions" style="display: none;">
-                    <button id="replaceAllBtn">Replace All</button>
-                </div>
-                
                 <div class="results-toolbar" id="resultsToolbar" style="display: none;">
                     <button id="viewToggleBtn" class="tool-btn" title="Switch between flat list and directory tree">🌳 Tree</button>
                     <button id="expandAllBtn" class="tool-btn" title="Expand every directory down to its files">⊞ Expand all</button>
@@ -1195,7 +1223,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const searchInput = document.getElementById('searchInput');
                     const replaceInput = document.getElementById('replaceInput');
                     const resultsDiv = document.getElementById('results');
-                    const toggleReplaceBtn = document.getElementById('toggleReplaceBtn');
                     const replaceGroup = document.getElementById('replaceGroup');
                     const replaceActions = document.getElementById('replaceActions');
                     const replaceAllBtn = document.getElementById('replaceAllBtn');
@@ -1215,6 +1242,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const confMaxResults = document.getElementById('confMaxResults');
                     const confPanelFont = document.getElementById('confPanelFont');
                     const confShowContextLine = document.getElementById('confShowContextLine');
+                    const confHoverColor = document.getElementById('confHoverColor');
                     const historyList = document.getElementById('historyList');
                     const historyBtn = document.getElementById('historyBtn');
                     const treeMenu = document.getElementById('treeMenu');
@@ -1410,21 +1438,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         triggerSearch();
                     });
 
-                    toggleReplaceBtn.addEventListener('click', () => {
-                        isReplaceMode = !isReplaceMode;
+                    // The Replace toggle lives in the view title bar now.
+                    function applyReplaceMode(enabled) {
+                        isReplaceMode = Boolean(enabled);
                         replaceGroup.style.display = isReplaceMode ? 'flex' : 'none';
                         replaceActions.style.display = isReplaceMode ? 'flex' : 'none';
-                        toggleReplaceBtn.innerText = isReplaceMode ? '▲ Replace' : '▼ Replace';
-                    });
+                    }
 
                     function toggleSettings() {
                         isSettingsMode = !isSettingsMode;
                         settingsPanel.style.display = isSettingsMode ? 'flex' : 'none';
                         mainSearchPanel.style.display = isSettingsMode ? 'none' : 'flex';
-                        
+                        document.body.classList.toggle('settings-open', isSettingsMode);
+
                         if (isSettingsMode) {
                             vscode.postMessage({ type: 'getConfig' });
                             vscode.postMessage({ type: 'getCaches' });
+                            // Bring the settings to the top so the whole form is reachable.
+                            requestAnimationFrame(() => settingsPanel.scrollIntoView({ block: 'start' }));
                         } else {
                             // Leaving settings: the host asks about index parameters a build has not picked up.
                             vscode.postMessage({ type: 'settingsClosed' });
@@ -1475,7 +1506,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             });
                         });
 
-                    [confFollowEditor, confPersistPinned, confAutoOpenResults, confAutoSearchResults, confShowContextLine]
+                    [confFollowEditor, confPersistPinned, confAutoOpenResults, confAutoSearchResults, confShowContextLine, confHoverColor]
                         .filter(Boolean)
                         .forEach(function (field) {
                             field.addEventListener('change', flushConfig);
@@ -2156,6 +2187,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     window.addEventListener('message', event => {
                         const message = event.data;
 
+                        if (message.type === 'replaceMode') {
+                            applyReplaceMode(message.value);
+                        }
+
                         if (message.type === 'configData') {
                             confIncludeExt.value = message.value.includeExtensions;
                             confExcludePat.value = message.value.excludePatterns;
@@ -2171,6 +2206,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             if (confAutoOpenResults) confAutoOpenResults.checked = message.value.autoOpenResults === true;
                             if (confAutoSearchResults) confAutoSearchResults.checked = message.value.autoSearchFromResults === true;
                             if (confShowContextLine) confShowContextLine.checked = message.value.showContextLine !== false;
+                        if (confHoverColor) confHoverColor.value = message.value.hoverHighlightColor || 'list.highlightForeground';
                             const showContext = message.value.showContextLine !== false;
                             if (showContext !== showContextLine) {
                                 showContextLine = showContext;

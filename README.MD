@@ -22,7 +22,7 @@ Instead of searching text "on the fly" for every query, the plugin builds an inv
 * **Native results tree:** results are a real VS Code **TreeView** (`fast-index.results`) grouped by directory then by file, with one row per match. Because VS Code renders it, everything is native: click to expand or collapse, keyboard navigation, the tree's own find widget, file icons, **Collapse All** in the view title, and **sticky scroll** (`workbench.tree.enableStickyScroll`) — including compressed overflow rows and collapsing a folder straight from a pinned row. Selecting a match scrolls the results editor to it; clicking one opens the file at that line.
 * **Filter results:** The box directly under the search field is a boolean modifier of the search — a row must match both the query and the filter (by file name or line text). It survives new searches, `Only in` / `Skip` edits and result refreshes, and clearing it re-runs the query. Every text field shows a ✕ on hover to clear it.
 * **Trigram Indexing:** Searches not just by whole words, but by word parts (e.g., `calc` will find `calculateTotalPrice`).
-* **Find & Replace:** replace across multiple files or one at a time. A single match is replaced from the results tree's context menu — **Replace This Match…** prompts for the text and remembers the last value used; Replace All stays in the panel. Multiline snippets are supported and every edit goes through `WorkspaceEdit`, so Ctrl+Z undoes it.
+* **Find & Replace:** replace across multiple files or one at a time. The **Replace** toggle now sits in the view's title bar and reveals the *Replace with…* field at the bottom of the controls, under *Skip*, together with **Replace All** — everything is hidden again when you toggle it off. A single match is replaced from the results tree's context menu — **Replace This Match…** prompts for the text and remembers the last value used. Multiline snippets are supported and every edit goes through `WorkspaceEdit`, so Ctrl+Z undoes it.
 * **Advanced Matching:** Toggle Case-Sensitive (`Aa`) matching or Regular Expressions (`.*`) right from the search bar.
 * **Native Sidebar Integration:** A dedicated activity bar icon ⚡️ ensures the search doesn't clutter your built-in tools. Keeps its state even when you switch tabs.
 * **Multithreading:** Heavy file parsing is offloaded to background OS threads. Your VS Code UI won't freeze during indexing.
@@ -52,6 +52,7 @@ Three of these settings shape the index itself: **Include Extensions**, **Exclud
 * **Panel Font Size (px):** Text size for the panel — search results, pinned searches, buttons — default `14`, range `9`–`24`. Everything in the panel scales from it, and the change is visible as you type.
 * **Hover jump timing** follows VS Code's own `workbench.hover.delay`; the extension no longer has a delay setting of its own.
 * **Results Context Lines:** Lines shown above and below each match in the results editor (default `2`).
+* **Hover Highlight Colour:** which theme colour marks the hovered result's file and folders in the results tree — the list highlight (default), or the theme's chart blue/green/orange/purple/red/yellow, or its info foreground. Also `fastIndex.hoverHighlightColor`.
 * **Keep pinned searches between sessions:** on/off (default on).
 * **Open the results editor automatically:** on/off (default off, also `fastIndex.autoOpenResults`). When on, a search that finds matches reopens the results tab if you closed it — without stealing focus, so you can keep typing in the panel.
 * **Auto Search: Follows text editor cursor and selection:** on/off.
@@ -82,7 +83,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog
 
-### 0.8.0 → 0.17.7 — native results tree, hover jump, pinned section, results editor and settings fixes
+### 0.8.0 → 0.18.0 — native results tree, hover jump, pinned section, results editor and settings fixes
 
 #### Results tab in the editor
 
@@ -136,6 +137,12 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 * **Hover jump works through `resolveTreeItem`.** A `TreeView` has no hover event, but VS Code calls the provider's `resolveTreeItem(item, element)` *when the pointer rests on a row*, because the row's `tooltip` is left undefined and the contract says it is "called on hover to resolve the tooltip if it is undefined". Match rows now never return a tooltip — the popup over the results was pure noise — so the call is used purely as the hover signal that jumps the results editor. VS Code memoises that resolution per row, so the provider refreshes just that row (element-scoped, ~300 ms later and throttled to once a second) to clear the cache and let the next hover fire again; the provider implements `getParent` so VS Code can walk from the row to its parent for that scoped refresh. Folder and file rows keep eager tooltips and never trigger it. Timing is `workbench.hover.delay`; selecting a match still jumps as well.
 * Directory rows carry **no icon** — the tree is a result list, not a file browser. File names are **bold**; directory nodes are semi-bold (600) so the two levels stay distinguishable.
 * New **`fastIndex.showContextLine`** toggle to hide the matched line under each result for a compact file-and-line list.
+
+#### Panel controls (0.18.0)
+
+* **Replace moved to the title bar.** The in-panel Replace button is gone; a `$(replace)` button in the view title toggles replace mode, which shows the *Replace with…* field under *Skip* plus Replace All.
+* **Settings no longer trap you.** Opening the settings switches the panel body to scrollable (`body.settings-open`), expands it to its content height and scrolls the settings into view, so every group is reachable even when the results section below is tall.
+* **`fastIndex.hoverHighlightColor`** picks the theme colour used for the hover highlight, both as a setting and as a dropdown in the panel settings.
 
 #### Panel access
 

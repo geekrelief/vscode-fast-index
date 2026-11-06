@@ -147,7 +147,11 @@ export async function activate(context: vscode.ExtensionContext) {
             if (event.affectsConfiguration('fastIndex.showContextLine')) {
                 resultsTree.setShowContextLine(sidebarProvider.showContextLineEnabled());
             }
+            if (event.affectsConfiguration('fastIndex.hoverHighlightColor')) {
+                activePath.refresh();
+            }
         }),
+        vscode.commands.registerCommand('vscode-fast-index.toggleReplace', () => sidebarProvider.toggleReplace()),
         vscode.commands.registerCommand('vscode-fast-index.lockResults', () => sidebarProvider.setLock(true)),
         // Editor title button: brings the view forward wherever its container lives —
         // the primary activity bar, or the secondary side bar after the user moved it.

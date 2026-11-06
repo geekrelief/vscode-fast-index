@@ -3,7 +3,7 @@
   "displayName": "Fast Project Indexer ",
   "description": "Lightning-fast text search for VS Code using a background inverted trigram index.",
   "publisher": "eric",
-  "version": "0.17.7",
+  "version": "0.18.0",
   "engines": {
     "vscode": "^1.108.0"
   },
@@ -114,6 +114,11 @@
         "command": "vscode-fast-index.openPanel",
         "title": "Fast Index: Open Search Panel",
         "icon": "$(zap)"
+      },
+      {
+        "command": "vscode-fast-index.toggleReplace",
+        "title": "Replace",
+        "icon": "$(replace)"
       }
     ],
     "menus": {
@@ -165,6 +170,11 @@
           "command": "vscode-fast-index.openResultsInEditor",
           "when": "view == fast-index.sidebar",
           "group": "navigation@3"
+        },
+        {
+          "command": "vscode-fast-index.toggleReplace",
+          "when": "view == fast-index.sidebar",
+          "group": "navigation@4"
         },
         {
           "command": "vscode-fast-index.showMenu",
@@ -245,6 +255,31 @@
           "type": "boolean",
           "default": true,
           "description": "Show the matched line of code (the hit's context line) under each result in the panel. Turn it off for a compact file-and-line list."
+        },
+        "fastIndex.hoverHighlightColor": {
+          "type": "string",
+          "default": "list.highlightForeground",
+          "enum": [
+            "list.highlightForeground",
+            "charts.blue",
+            "charts.green",
+            "charts.orange",
+            "charts.purple",
+            "charts.red",
+            "charts.yellow",
+            "editorInfo.foreground"
+          ],
+          "enumDescriptions": [
+            "The theme's list highlight colour (default)",
+            "Theme chart blue",
+            "Theme chart green",
+            "Theme chart orange",
+            "Theme chart purple",
+            "Theme chart red",
+            "Theme chart yellow",
+            "The theme's info foreground"
+          ],
+          "description": "Theme colour used to highlight the hovered result's file row and its folders in the results tree."
         },
         "fastIndex.panelFontSize": {
           "type": "number",

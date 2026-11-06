@@ -42,6 +42,18 @@ interface DirBuilder {
 
 const emptyBuilder = (): DirBuilder => ({ dirs: new Map(), files: new Map() });
 
+/** Theme colour ids offered for the hover highlight; the first is the default. */
+export const HIGHLIGHT_COLORS = [
+    'list.highlightForeground',
+    'charts.blue',
+    'charts.green',
+    'charts.orange',
+    'charts.purple',
+    'charts.red',
+    'charts.yellow',
+    'editorInfo.foreground'
+];
+
 /**
  * Renders the current results as a real tree view, so VS Code owns expansion,
  * keyboard navigation, context menus and sticky scroll (workbench.tree.enableStickyScroll),
@@ -322,7 +334,18 @@ export class ActivePathDecorationProvider implements vscode.FileDecorationProvid
 
     public provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
         if (!this.active.has(uri.toString())) return undefined;
-        return { color: new vscode.ThemeColor('list.highlightForeground') };
+        return { color: new vscode.ThemeColor(this.colorId()) };
+    }
+
+    /** Reflects fastIndex.hoverHighlightColor, falling back to the theme default. */
+    private colorId(): string {
+        const configured = vscode.workspace.getConfiguration('fastIndex').get<string>('hoverHighlightColor');
+        return configured && HIGHLIGHT_COLORS.includes(configured) ? configured : HIGHLIGHT_COLORS[0];
+    }
+
+    /** Re-reads the colour (the setting changed). */
+    public refresh(): void {
+        this.emitter.fire(undefined);
     }
 
     public dispose(): void {
