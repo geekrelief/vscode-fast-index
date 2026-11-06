@@ -16,6 +16,8 @@ export interface PinnedSearch {
 }
 
 const PINNED_KEY = 'fastIndex.pinnedSearches';
+/** Workspace state: the index-affecting settings the last successful build used. */
+const INDEXED_CONFIG_KEY = 'fastIndex.indexedConfig';
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
@@ -24,8 +26,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     /** Where the user last put the caret, so opening the panel can tell that from an open at 0,0. */
     private lastUserCursor?: { uri: string; line: number; character: number };
     private lockNoticed = false;
-    /** Set when an index-affecting setting changed; the panel shows the Reindex hint. */
-    private pendingReindex = false;
+    /** Settings a build already consumed; the index is stale relative to the current ones when they differ. */
+    private promptedIndexSignature = '';
     private _statusText = 'Starting…';
     private _statusState: 'busy' | 'ready' | 'idle' = 'busy';
 
@@ -61,9 +63,88 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 followEditor: config.get<boolean>('followEditor') ?? true,
                 persistPinnedSearches: config.get<boolean>('persistPinnedSearches') !== false,
                 autoOpenResults: config.get<boolean>('autoOpenResults') === true,
-                pendingReindex: this.pendingReindex
+                pendingFields: this.pendingIndexFields()
             }
         });
+    }
+
+    /** The settings a build actually consumed, so "stale" can be measured rather than guessed. */
+    private currentIndexConfig(): { includeExtensions: string; excludePatterns: string; maxFileSizeKB: number } {
+        const config = vscode.workspace.getConfiguration('fastIndex');
+        return {
+            includeExtensions: config.get<string>('includeExtensions') ?? '',
+            excludePatterns: config.get<string>('excludePatterns') ?? '',
+            maxFileSizeKB: config.get<number>('maxFileSizeKB') ?? 512
+        };
+    }
+
+    private indexedConfig(): { includeExtensions: string; excludePatterns: string; maxFileSizeKB: number } | undefined {
+        return this.memento?.get<{ includeExtensions: string; excludePatterns: string; maxFileSizeKB: number }>(INDEXED_CONFIG_KEY);
+    }
+
+    /** Human names of the index-affecting settings that no build has picked up yet. */
+    private pendingIndexFields(): string[] {
+        const indexed = this.indexedConfig();
+        if (!indexed) return [];
+        const current = this.currentIndexConfig();
+        const fields: string[] = [];
+        if (indexed.includeExtensions !== current.includeExtensions) fields.push('Include Extensions');
+        if (indexed.excludePatterns !== current.excludePatterns) fields.push('Exclude Patterns');
+        if (indexed.maxFileSizeKB !== current.maxFileSizeKB) fields.push('Max File Size');
+        return fields;
+    }
+
+    /** Called after a build succeeds: the current settings are now what the index reflects. */
+    public markIndexed(): void {
+        const snapshot = this.currentIndexConfig();
+        void this.memento?.update(INDEXED_CONFIG_KEY, snapshot);
+        // A fresh build may be asked about the next pending change, even a repeat of this one.
+        this.promptedIndexSignature = '';
+        this.sendConfig();
+    }
+
+    /** Restores the index-affecting settings the current index was built with. */
+    private async undoIndexSettings(): Promise<void> {
+        const indexed = this.indexedConfig();
+        if (!indexed) return;
+        const config = vscode.workspace.getConfiguration('fastIndex');
+        const target = vscode.ConfigurationTarget.Workspace;
+        try {
+            await config.update('includeExtensions', indexed.includeExtensions, target);
+            await config.update('excludePatterns', indexed.excludePatterns, target);
+            await config.update('maxFileSizeKB', indexed.maxFileSizeKB, target);
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Fast Index: could not restore settings (${error?.message ?? error})`);
+        }
+        // Re-applying the same values after a reject must be able to ask again.
+        this.promptedIndexSignature = '';
+        this.sendConfig();
+    }
+
+    /**
+     * Asks what to do about index settings that no build has picked up, once per
+     * distinct set of values, so dismissing it does not nag on every panel hide.
+     */
+    private async promptPendingIndex(): Promise<void> {
+        const fields = this.pendingIndexFields();
+        if (fields.length === 0) return;
+
+        const signature = JSON.stringify(this.currentIndexConfig());
+        if (this.promptedIndexSignature === signature) return;
+        this.promptedIndexSignature = signature;
+
+        const choice = await vscode.window.showWarningMessage(
+            `Fast Index: ${fields.join(', ')} changed since this index was built, so results may be stale.`,
+            { modal: true },
+            'Reindex now',
+            'Reject changes',
+            'Keep for now'
+        );
+        if (choice === 'Reindex now') {
+            void vscode.commands.executeCommand('vscode-fast-index.buildIndex');
+        } else if (choice === 'Reject changes') {
+            await this.undoIndexSettings();
+        }
     }
 
     public getViewMode(): 'tree' | 'flat' {
@@ -112,6 +193,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             if (Array.isArray(stored)) {
                 this.pinned = stored.filter(entry => entry && typeof entry.query === 'string').slice(0, 100);
             }
+        }
+
+        // Baseline for "is the index stale?": an install that predates this key is assumed
+        // to match whatever its index was built with, rather than claiming staleness.
+        if (memento && !memento.get<unknown>(INDEXED_CONFIG_KEY)) {
+            void memento.update(INDEXED_CONFIG_KEY, this.currentIndexConfig());
         }
 
         // Registered for the provider's lifetime, not the webview's: the last deliberate
@@ -171,7 +258,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
         // When the view is revealed, seed the search box from the editor and focus it.
         webviewView.onDidChangeVisibility(() => {
-            if (!webviewView.visible) return;
+            if (!webviewView.visible) {
+                // Leaving the panel with index settings a build has not picked up yet.
+                void this.promptPendingIndex();
+                return;
+            }
             this.prefillOnOpen();
             this._view?.webview.postMessage({ type: 'focus' });
         });
@@ -327,8 +418,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     break;
                 }
                 case 'rebuildIndex': {
-                    this.pendingReindex = false;
+                    this.promptedIndexSignature = '';
                     vscode.commands.executeCommand('vscode-fast-index.buildIndex');
+                    break;
+                }
+                case 'undoIndexSettings': {
+                    await this.undoIndexSettings();
+                    break;
+                }
+                case 'settingsClosed': {
+                    void this.promptPendingIndex();
                     break;
                 }
                 case 'openFile': {
@@ -396,22 +495,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         }
                     }
 
-                    const reindexNeeded = next.includeExtensions !== current.includeExtensions
-                        || next.excludePatterns !== current.excludePatterns
-                        || next.maxFileSizeKB !== current.maxFileSizeKB;
-
                     if (failures.length > 0) {
                         vscode.window.showErrorMessage(`Fast Index: could not save ${failures.join(', ')}`);
                     }
                     // Settings are saved as the user edits; index-affecting keys only flag
-                    // that a Reindex is due, they never rebuild behind the user's back.
-                    if (reindexNeeded) this.pendingReindex = true;
-
+                    // that the index is stale, they never rebuild behind the user's back.
                     // Reflect what is actually stored, and re-run the current search so a new
                     // result limit takes effect immediately.
                     this._view?.webview.postMessage({
                         type: 'configData',
-                        value: { ...next, saved: true, pendingReindex: this.pendingReindex }
+                        value: { ...next, saved: true, pendingFields: this.pendingIndexFields() }
                     });
                     break;
                 }
@@ -856,6 +949,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     .tool-btn:hover { background: var(--vscode-button-secondaryHoverBackground); }
                     .lock-badge { font-size: 0.8em; padding: 1px 8px; border-radius: 8px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); white-space: nowrap; }
                     .setting-hint { font-size: 0.85em; opacity: 0.85; margin-top: 4px; }
+                    .reindex-banner { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 6px 8px; border-radius: 4px; background: var(--vscode-inputValidation-warningBackground, rgba(255, 204, 0, 0.15)); border: 1px solid var(--vscode-inputValidation-warningBorder, rgba(255, 204, 0, 0.5)); font-size: 0.85em; }
+                    .reindex-text { flex: 1; }
+                    .link-btn { background: transparent; border: none; padding: 0; cursor: pointer; color: var(--vscode-textLink-foreground); font-size: 1em; text-decoration: underline; }
+                    .link-btn:hover { color: var(--vscode-textLink-activeForeground); }
                     .results-count { margin-left: auto; font-size: 0.8em; opacity: 0.7; }
                     .subsearch input { width: 100%; padding: 4px 6px; margin-bottom: 6px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); box-sizing: border-box; font-size: 0.85em; }
                     .subsearch input:focus { border-color: var(--vscode-focusBorder); outline: none; }
@@ -973,10 +1070,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             <button id="deleteStaleBtn" class="danger" disabled>Delete stale</button>
                         </div>
                     </div>
-                    <div style="display: flex; gap: 5px; margin-top: 5px;">
-                        <button id="reindexBtn" style="flex: 1;" title="Rebuild the index. Settings are saved as you edit them.">🔁 Reindex</button>
+                    <div class="reindex-banner" id="reindexHint" style="display: none;">
+                        <span class="reindex-text" id="reindexText"></span>
+                        <button id="undoIndexBtn" class="link-btn" title="Restore the include/exclude/size settings the current index was built with">Undo changes</button>
                     </div>
-                    <div class="setting-hint" id="reindexHint" style="display: none;">Index settings changed — press Reindex to apply them.</div>
+                    <div style="display: flex; gap: 5px; margin-top: 5px;">
+                        <button id="reindexBtn" style="flex: 1;" title="Rebuild the index with the current settings.">🔁 Reindex</button>
+                    </div>
                 </div>
                 
                 <div class="actions">
@@ -1017,6 +1117,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const settingsPanel = document.getElementById('settingsPanel');
                     const reindexBtn = document.getElementById('reindexBtn');
                     const reindexHint = document.getElementById('reindexHint');
+                    const reindexText = document.getElementById('reindexText');
+                    const undoIndexBtn = document.getElementById('undoIndexBtn');
                     const mainSearchPanel = document.getElementById('mainSearchPanel');
                     const matchCaseBtn = document.getElementById('matchCaseBtn');
                     const regexBtn = document.getElementById('regexBtn');
@@ -1235,6 +1337,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         if (isSettingsMode) {
                             vscode.postMessage({ type: 'getConfig' });
                             vscode.postMessage({ type: 'getCaches' });
+                        } else {
+                            // Leaving settings: the host asks about index parameters a build has not picked up.
+                            vscode.postMessage({ type: 'settingsClosed' });
                         }
                     }
 
@@ -1292,6 +1397,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         settingsPanel.style.display = 'none';
                         mainSearchPanel.style.display = 'flex';
                     });
+
+                    if (undoIndexBtn) {
+                        undoIndexBtn.addEventListener('click', (event) => {
+                            event.stopPropagation();
+                            vscode.postMessage({ type: 'undoIndexSettings' });
+                        });
+                    }
 
                     replaceAllBtn.addEventListener('click', () => {
                         if (currentResults.length === 0) return;
@@ -1979,7 +2091,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                                 persistHistory();
                             }
                             if (reindexHint) {
-                                reindexHint.style.display = message.value.pendingReindex === true ? '' : 'none';
+                                const pendingFields = Array.isArray(message.value.pendingFields) ? message.value.pendingFields : [];
+                                const stale = pendingFields.length > 0;
+                                reindexHint.style.display = stale ? 'flex' : 'none';
+                                if (reindexText) {
+                                    reindexText.textContent = stale
+                                        ? 'Index is stale — changed: ' + pendingFields.join(', ') + '. Reindex to commit them.'
+                                        : '';
+                                }
                             }
                             // A live-saved setting such as the result limit applies at once.
                             if (message.value.saved && searchInput.value && (isRegex || searchInput.value.length >= 3)) {

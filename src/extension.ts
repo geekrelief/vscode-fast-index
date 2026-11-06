@@ -27,6 +27,8 @@ export async function activate(context: vscode.ExtensionContext) {
                 skipped.clear();
                 await context.globalState.update(SKIPPED_KEY, []);
             }
+            // A full build is the only thing that clears every folder's staleness.
+            if (!only) sidebarProvider.markIndexed();
         }
         return saved;
     };
