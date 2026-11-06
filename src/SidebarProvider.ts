@@ -1949,9 +1949,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         scheduleStickyUpdate();
                     }
 
-                    // Mirrors VS Code's StickyScrollController for trees: walk the ancestor chain
-                    // of the top visible row, stack one bar per level, and slide the last bar out
-                    // as the end of its subtree reaches the stack.
+                    // Mirrors VS Code's StickyScrollController for trees: the ancestor chain of
+                    // the top visible row is pinned, indented like the tree, with every directory
+                    // hidden under the stack represented, and a file bar handing over to the next
+                    // file only when that file reaches the bottom of the stack.
                     let stickyFrame = 0;
 
                     function updateStickyStack() {
@@ -1964,58 +1965,73 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
                         const container = resultsDiv.getBoundingClientRect();
                         const viewTop = container.top;
-                        const viewBottom = container.bottom;
-                        const maxStackHeight = Math.max(STICKY_BAR_HEIGHT, (viewBottom - viewTop) * 0.4);
+                        const maxBars = Math.max(2, Math.min(STICKY_MAX_BARS, Math.floor((container.height * 0.4) / STICKY_BAR_HEIGHT)));
+                        const topOf = (row) => row.getBoundingClientRect().top - viewTop;
+                        const bottomOf = (row) => row.getBoundingClientRect().bottom - viewTop;
+                        const depthOf = (row) => Number(row.dataset.depth);
 
-                        // First row still reaching into the viewport.
                         let first = -1;
                         for (let index = 0; index < rows.length; index++) {
-                            if (rows[index].getBoundingClientRect().bottom > viewTop + 1) {
-                                first = index;
-                                break;
-                            }
+                            if (bottomOf(rows[index]) > 0.5) { first = index; break; }
                         }
                         if (first < 0) {
                             stickyStack.style.visibility = 'hidden';
                             return;
                         }
 
-                        const chain = [];
-                        let depth = Number(rows[first].dataset.depth);
-                        for (let index = first - 1; index >= 0 && chain.length < STICKY_MAX_BARS; index--) {
-                            const candidate = Number(rows[index].dataset.depth);
-                            if (candidate < depth) {
-                                chain.unshift(rows[index]);
-                                depth = candidate;
+                        const buildChain = () => {
+                            const chain = [];
+                            let depth = depthOf(rows[first]);
+                            for (let index = first - 1; index >= 0 && chain.length < maxBars; index--) {
+                                if (depthOf(rows[index]) < depth) {
+                                    chain.unshift(index);
+                                    depth = depthOf(rows[index]);
+                                }
                             }
+                            // The top row itself when it is an open parent.
+                            if (chain.length < maxBars && first + 1 < rows.length && depthOf(rows[first + 1]) > depthOf(rows[first])) {
+                                chain.push(first);
+                            }
+                            // Any directory scrolling under the stack must stay visible there.
+                            for (let index = first; index < rows.length && chain.length < maxBars; index++) {
+                                if (chain.indexOf(index) >= 0) continue;
+                                if (!rows[index].classList.contains('tree-dir')) continue;
+                                if (topOf(rows[index]) < chain.length * STICKY_BAR_HEIGHT && bottomOf(rows[index]) > 0) chain.push(index);
+                            }
+                            chain.sort((a, b) => a - b);
+                            return chain;
+                        };
+
+                        let chain = buildChain();
+                        let push = 0;
+
+                        // A file bar is only pinned until the next file reaches the stack bottom.
+                        for (let guard = 0; guard < 3; guard++) {
+                            const last = chain[chain.length - 1];
+                            if (last === undefined || !rows[last].classList.contains('tree-file')) break;
+                            let end = last + 1;
+                            while (end < rows.length && depthOf(rows[end]) > depthOf(rows[last])) end++;
+                            if (end >= rows.length) break;
+                            const overlap = chain.length * STICKY_BAR_HEIGHT - topOf(rows[end]);
+                            if (overlap < STICKY_BAR_HEIGHT) {
+                                push = overlap;
+                                break;
+                            }
+                            // Hand over: the finished file gives its slot to the next one.
+                            chain = chain.slice(0, -1);
+                            push = 0;
+                            if (topOf(rows[end]) < chain.length * STICKY_BAR_HEIGHT) chain.push(end);
                         }
 
-                        // A parent that starts the viewport and is still open is itself pinned.
-                        const nextDepth = first + 1 < rows.length ? Number(rows[first + 1].dataset.depth) : -1;
-                        if (chain.length < STICKY_MAX_BARS && nextDepth > Number(rows[first].dataset.depth)) {
-                            chain.push(rows[first]);
-                        }
-                        while (chain.length > 0 && chain.length * STICKY_BAR_HEIGHT > maxStackHeight) chain.shift();
                         if (chain.length === 0) {
                             stickyStack.style.visibility = 'hidden';
                             return;
                         }
 
-                        // How far the deepest bar has been pushed by the end of its subtree.
-                        const deepest = chain[chain.length - 1];
-                        const deepestIndex = rows.indexOf(deepest);
-                        const deepestDepth = Number(deepest.dataset.depth);
-                        let endIndex = deepestIndex + 1;
-                        while (endIndex < rows.length && Number(rows[endIndex].dataset.depth) > deepestDepth) endIndex++;
-                        const subtreeEnd = endIndex < rows.length
-                            ? rows[endIndex].getBoundingClientRect().top - viewTop
-                            : Number.POSITIVE_INFINITY;
-                        const stackBottom = chain.length * STICKY_BAR_HEIGHT;
-                        const push = subtreeEnd < stackBottom ? stackBottom - Math.max(0, subtreeEnd) : 0;
-
                         while (stickyStack.childElementCount > chain.length) stickyStack.lastElementChild.remove();
-                        chain.forEach(function (row, index) {
-                            let bar = stickyStack.children[index];
+                        chain.forEach(function (rowIndex, position) {
+                            const row = rows[rowIndex];
+                            let bar = stickyStack.children[position];
                             if (!bar) {
                                 bar = document.createElement('div');
                                 bar.className = 'sticky-bar';
@@ -2024,9 +2040,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             const name = row.querySelector('.dir-name');
                             bar.textContent = name ? name.textContent : (row.dataset.path || '');
                             bar.title = row.dataset.path || '';
-                            bar.style.top = (index * STICKY_BAR_HEIGHT) + 'px';
-                            const last = index === chain.length - 1;
-                            bar.style.transform = last && push > 0 ? 'translateY(-' + Math.round(push) + 'px)' : '';
+                            bar.style.top = (position * STICKY_BAR_HEIGHT) + 'px';
+                            bar.style.paddingLeft = (8 + depthOf(row) * 12) + 'px';
+                            const isLast = position === chain.length - 1;
+                            bar.style.transform = isLast && push > 0 ? 'translateY(-' + Math.round(push) + 'px)' : '';
                         });
                         stickyStack.style.visibility = 'visible';
                     }
