@@ -978,6 +978,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     .pinned-delete:hover { opacity: 1; }
                     .clearable { position: relative; display: flex; align-items: center; flex: 1 1 auto; min-width: 0; }
                     .clearable input { width: 100%; padding-right: 24px; box-sizing: border-box; }
+                    /* Editable combo: the recent-searches caret lives inside the field. */
+                    .clearable.has-caret input { padding-right: 46px; }
+                    .clearable.has-caret .clear-btn { right: 28px; }
+                    .combo-caret {
+                        position: absolute;
+                        right: 5px;
+                        top: 50%;
+                        transform: translateY(-50%);
+                        cursor: pointer;
+                        opacity: 0.7;
+                        font-size: 0.8em;
+                        line-height: 1;
+                        user-select: none;
+                        padding: 2px 4px;
+                        border-radius: 2px;
+                    }
+                    .combo-caret:hover { opacity: 1; background: var(--vscode-toolbar-hoverBackground); }
+                    .combo-caret.open { opacity: 1; background: var(--vscode-inputOption-activeBackground); color: var(--vscode-inputOption-activeForeground); }
                     .clearable .clear-btn { display: none; position: absolute; right: 6px; cursor: pointer; opacity: 0.65; font-size: 0.85em; line-height: 1; user-select: none; }
                     .clearable:hover .clear-btn { display: block; }
                     .clearable input:placeholder-shown + .clear-btn { display: none; }
@@ -1098,13 +1116,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
                 <div class="search-panel" id="mainSearchPanel">
                     <div class="input-group">
-                        <div class="clearable">
+                        <div class="clearable has-caret">
                             <input type="text" id="searchInput" placeholder="Search..." />
                             <span class="clear-btn" title="Clear">✕</span>
+                            <span class="combo-caret" id="historyBtn" title="Recent searches (Alt+↓)">▾</span>
                         </div>
                         <div id="matchCaseBtn" class="toggle-btn" title="Match Case">Aa</div>
                         <div id="regexBtn" class="toggle-btn" title="Use Regular Expression">.*</div>
-                        <div id="historyBtn" class="toggle-btn" title="Recent searches">▾</div>
                         <div id="pinBtn" class="toggle-btn" title="Pin this search">📌</div>
                     </div>
                     <div class="history-list" id="historyList"></div>
@@ -1631,6 +1649,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
                     function hideHistory() {
                         historyList.style.display = 'none';
+                        if (historyBtn) historyBtn.classList.remove('open');
                         historyIndex = -1;
                     }
 
@@ -1664,11 +1683,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             historyList.appendChild(row);
                         });
                         historyList.style.display = 'flex';
+                        if (historyBtn) historyBtn.classList.add('open');
                         historyIndex = -1;
                     }
 
                     searchInput.addEventListener('keydown', function (event) {
-                        if (event.key === 'ArrowDown') {
+                        if (event.key === 'ArrowDown' && event.altKey) {
+                            // Alt+Down opens the full list, like a combo box.
+                            event.preventDefault();
+                            if (historyList.style.display === 'flex') hideHistory();
+                            else showHistory(true);
+                        } else if (event.key === 'ArrowDown') {
                             event.preventDefault();
                             if (historyList.style.display !== 'flex') showHistory();
                             moveHistory(1);
@@ -1684,6 +1709,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         } else if (event.key === 'Escape') {
                             hideHistory();
                         }
+                    });
+
+                    // Typing re-filters an open list, so the field behaves like an editable combo.
+                    searchInput.addEventListener('input', function () {
+                        if (historyList.style.display === 'flex') showHistory();
                     });
 
                     historyBtn.addEventListener('mousedown', function (event) {

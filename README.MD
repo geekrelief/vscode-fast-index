@@ -6,7 +6,7 @@ Instead of searching text "on the fly" for every query, the plugin builds an inv
 
 ## Key Features
 
-* **Instant Search:** Results appear as you type (from 3 characters) with zero lag. The search box takes focus when the panel opens and doubles as an editable combo box: recent searches drop down from the ▾ button on the right, `↑`/`↓` walk them, `Enter` runs the highlighted one. The list size is `fastIndex.maxRecentSearches` (default 20, 0 disables it).
+* **Instant Search:** Results appear as you type (from 3 characters) with zero lag. The search box takes focus when the panel opens and doubles as an **editable combo box**: the ▾ caret sits *inside* the field, where there used to be a separate button — click it (or press `Alt+↓`) for every recent search, press `↓`/`↑` to walk them, and typing filters the open list. `Enter` runs the highlighted entry, `Esc` closes it. The list size is `fastIndex.maxRecentSearches` (default 20, 0 disables it).
 * **No surprise prefills:** opening the panel never restores the previous query. It seeds the box from an explicit **selection**, or from a caret **you** placed (clicking a word, or typing) — never from the caret a file open leaves at 0,0. While the panel is open, clicking onto a word (or selecting text) keeps the box in sync, and the box stops being "yours" as soon as focus returns to the editor. Toggle the whole behavior with `fastIndex.followEditor` (or the checkbox in the panel settings), or freeze it temporarily with the 🔒 title-bar lock.
 * **Replace keeps the index current:** applying a replacement re-indexes the affected buffers immediately, and searching reads open (dirty) documents, so replaced text disappears from results and new text is findable without saving first.
 * **Results in the editor:** the book icon in the title bar (**Fast Index: Open Results in Editor**) opens the current results as a real editor tab, written in VS Code's own search-editor format so the built-in `search-result` language gives it theme-driven syntax highlighting, Follow-link targets and peek-on-click. It is driven by the panel and refreshed in place. Set `fastIndex.autoOpenResults` to have it open itself after a search.
@@ -83,7 +83,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog
 
-### 0.8.0 → 0.18.2 — native results tree, hover jump, pinned section, results editor and settings fixes
+### 0.8.0 → 0.19.0 — native results tree, hover jump, pinned section, results editor and settings fixes
 
 #### Results tab in the editor
 
