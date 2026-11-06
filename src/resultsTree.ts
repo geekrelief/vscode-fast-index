@@ -58,6 +58,8 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
 
     /** Throttles the refresh that makes a row resolvable again, so hovers cannot loop. */
     private lastHoverRefresh = 0;
+    /** Parent links, so a single row can be refreshed instead of the whole tree. */
+    private readonly parentOf = new WeakMap<TreeNode, TreeNode>();
 
     /** Rebuilds the tree; called whenever the panel produces new results. */
     public setResults(rows: ResultRow[], showContextLine: boolean): void {
@@ -75,8 +77,19 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
     public getChildren(node?: TreeNode): TreeNode[] {
         if (!node) return this.roots;
         if (node.kind === 'dir') return node.children;
-        if (node.kind === 'file') return node.rows.map((row) => this.matchNode(row, node.path));
+        if (node.kind === 'file') {
+            return node.rows.map((row) => {
+                const match = this.matchNode(row, node.path);
+                this.parentOf.set(match, node);
+                return match;
+            });
+        }
         return [];
+    }
+
+    /** Needed for element-scoped refreshes (and reveal): VS Code walks up to the parent. */
+    public getParent(node: TreeNode): TreeNode | undefined {
+        return this.parentOf.get(node);
     }
 
     public getTreeItem(node: TreeNode): vscode.TreeItem {
@@ -133,8 +146,8 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
         const now = Date.now();
         if (now - this.lastHoverRefresh > 1000) {
             this.lastHoverRefresh = now;
-            // Refresh after the hover has been handled, so it does not interrupt the jump.
-            setTimeout(() => this.emitter.fire(undefined), 300);
+            // Refresh just this row (getParent supplies the link) so it can resolve again.
+            setTimeout(() => this.emitter.fire(element), 300);
         }
         return item;
     }
@@ -158,14 +171,16 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
             for (const name of Array.from(builder.dirs.keys()).sort((a, b) => a.localeCompare(b))) {
                 const dirPath = prefix ? prefix + '/' + name : name;
                 const kids = toNodes(builder.dirs.get(name)!, dirPath);
-                children.push({
+                const dirNode: DirNode = {
                     kind: 'dir',
                     id: 'dir:' + dirPath,
                     name,
                     path: dirPath,
                     count: kids.reduce((sum, kid) => sum + (kid.kind === 'dir' ? kid.count : kid.kind === 'file' ? kid.rows.length : 1), 0),
                     children: kids
-                });
+                };
+                for (const kid of kids) this.parentOf.set(kid, dirNode);
+                children.push(dirNode);
             }
             for (const name of Array.from(builder.files.keys()).sort((a, b) => a.localeCompare(b))) {
                 const filePath = prefix ? prefix + '/' + name : name;

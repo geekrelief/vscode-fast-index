@@ -82,7 +82,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog
 
-### 0.8.0 → 0.17.2 — native results tree, hover jump, pinned section, results editor and settings fixes
+### 0.8.0 → 0.17.3 — native results tree, hover jump, pinned section, results editor and settings fixes
 
 #### Results tab in the editor
 
@@ -132,7 +132,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 * **Replace moved to the context menu.** The per-row inline Replace button is gone; right-clicking a match offers **Replace This Match…**, which prompts for the replacement (prefilled with the last value used) and then refreshes the tree and the results editor.
 * The webview still owns the search box, filter, scope fields and settings; its results area is no longer rendered.
 * **Pinned Searches is its own collapsible section** (`fast-index.pins`), so pins can no longer overlap the results. Click a pin to restore it; right-click to **Remove Pinned Search**.
-* **Hover jump works through `resolveTreeItem`.** A `TreeView` has no hover event, but VS Code calls the provider's `resolveTreeItem(item, element)` *when the pointer rests on a row*, because the row's `tooltip` is left undefined and the contract says it is "called on hover to resolve the tooltip if it is undefined". Match rows now never return a tooltip — the popup over the results was pure noise — so the call is used purely as the hover signal that jumps the results editor. VS Code memoises that resolution per row, so the provider refreshes the tree ~300 ms after handling a hover (throttled to once a second) to clear the cache and let the next hover fire again. Folder and file rows keep eager tooltips and never trigger it. Timing is `workbench.hover.delay`; selecting a match still jumps as well.
+* **Hover jump works through `resolveTreeItem`.** A `TreeView` has no hover event, but VS Code calls the provider's `resolveTreeItem(item, element)` *when the pointer rests on a row*, because the row's `tooltip` is left undefined and the contract says it is "called on hover to resolve the tooltip if it is undefined". Match rows now never return a tooltip — the popup over the results was pure noise — so the call is used purely as the hover signal that jumps the results editor. VS Code memoises that resolution per row, so the provider refreshes just that row (element-scoped, ~300 ms later and throttled to once a second) to clear the cache and let the next hover fire again; the provider implements `getParent` so VS Code can walk from the row to its parent for that scoped refresh. Folder and file rows keep eager tooltips and never trigger it. Timing is `workbench.hover.delay`; selecting a match still jumps as well.
 * File names are **bold** in both the tree and the flat list; directory nodes are semi-bold (600) so the two levels stay distinguishable.
 * New **`fastIndex.showContextLine`** toggle to hide the matched line under each result for a compact file-and-line list.
 
