@@ -42,17 +42,20 @@ interface DirBuilder {
 
 const emptyBuilder = (): DirBuilder => ({ dirs: new Map(), files: new Map() });
 
-/** Theme color ids offered for the hover highlight; the first is the default. */
+/** Theme color ids offered for the hover highlight. */
 export const HIGHLIGHT_COLORS = [
+    'charts.yellow',
     'list.highlightForeground',
     'charts.blue',
     'charts.green',
     'charts.orange',
     'charts.purple',
     'charts.red',
-    'charts.yellow',
     'editorInfo.foreground'
 ];
+
+/** Used when the setting is missing or names an unknown color. */
+export const DEFAULT_HIGHLIGHT_COLOR = 'charts.yellow';
 
 /**
  * Renders the current results as a real tree view, so VS Code owns expansion,
@@ -73,39 +76,21 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
 
     /** Throttles the refresh that makes a row resolvable again, so hovers cannot loop. */
     private lastHoverRefresh = 0;
-    /** Relative path of the file whose rows are currently highlighted, if any. */
-    private activeFile?: string;
-    /** Id of the match row the pointer is on, so it is colored too. */
-    private activeMatchId?: string;
+    /** URIs of the currently highlighted path, so only changes are repainted. */
+    private activeUris: string[] = [];
     /** Parent links, so a single row can be refreshed instead of the whole tree. */
     private readonly parentOf = new WeakMap<TreeNode, TreeNode>();
     /** Path index, to find the nodes of the active path without walking the tree. */
     private readonly nodeByPath = new Map<string, DirNode | FileNode>();
-    /** Match nodes by id, so a stale color can be cleared without walking the tree. */
-    private readonly matchById = new Map<string, MatchNode>();
 
     /** Rebuilds the tree; called whenever the panel produces new results. */
     public setResults(rows: ResultRow[], showContextLine: boolean): void {
         this.showContextLine = showContextLine;
-        this.activeFile = undefined;
-        this.activeMatchId = undefined;
+        this.activeUris = [];
         this.nodeByPath.clear();
-        this.matchById.clear();
         this.onActivePath?.([]);
         this.roots = this.build(rows);
         this.emitter.fire(undefined);
-    }
-
-    private isActive(node: DirNode | FileNode): boolean {
-        if (!this.activeFile) return false;
-        if (node.kind === 'file') return node.path === this.activeFile;
-        return this.activeFile.startsWith(node.path + '/');
-    }
-
-    /** Color comes from the label's highlights: the theme's list highlight color. */
-    private labelFor(node: DirNode | FileNode): string | vscode.TreeItemLabel {
-        if (!this.isActive(node)) return node.name;
-        return { label: node.name, highlights: [[0, node.name.length]] };
     }
 
     /** The file row and its ancestors, for the highlighted path. */
@@ -123,33 +108,28 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
     }
 
     /**
-     * Colors the hovered match row, its file and its ancestor directories. Fires
-     * element-scoped refreshes (deferred: the provider contract forbids firing
-     * onDidChangeTreeData from inside resolveTreeItem), touching only the rows
-     * whose color actually changes.
+     * Marks the hovered match row, its file and its ancestor directories as the
+     * active path. Only the URIs change: the decoration provider repaints exactly
+     * those rows, so no tree refresh happens and the rows cannot flash their
+     * undecorated color on the way.
      */
     private markActive(element: MatchNode): void {
-        const file = String(element.row.fileName || '');
-        if (file === this.activeFile && element.id === this.activeMatchId) return;
+        const uris = [
+            this.matchUri(element),
+            ...this.pathNodes(String(element.row.fileName || '')).map((node) => this.uriFor(node.path).toString())
+        ];
+        if (uris.join('|') === this.activeUris.join('|')) return;
+        this.activeUris = uris;
+        this.onActivePath?.(uris);
+    }
 
-        const fileChanged = this.activeFile !== file;
-        const stale: TreeNode[] = [];
-        if (fileChanged) stale.push(...this.pathNodes(this.activeFile));
-        const previousMatch = this.activeMatchId ? this.matchById.get(this.activeMatchId) : undefined;
-        if (previousMatch && previousMatch.id !== element.id) stale.push(previousMatch);
+    /** A per-match URI, so the hovered line is decorated like its file and folders. */
+    private matchPath(node: MatchNode): string {
+        return 'match/' + String(node.row.file).replace(/\\/g, '/') + ':' + node.row.line;
+    }
 
-        this.activeFile = file;
-        this.activeMatchId = element.id;
-
-        const fresh: TreeNode[] = [element];
-        if (fileChanged) fresh.push(...this.pathNodes(file));
-
-        this.onActivePath?.(this.pathNodes(file).map((node) => this.uriFor(node.path).toString()));
-
-        setTimeout(() => {
-            for (const node of stale) this.emitter.fire(node);
-            for (const node of fresh) this.emitter.fire(node);
-        }, 0);
+    private matchUri(node: MatchNode): string {
+        return this.uriFor(this.matchPath(node)).toString();
     }
 
     public setShowContextLine(value: boolean): void {
@@ -165,7 +145,6 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
             return node.rows.map((row) => {
                 const match = this.matchNode(row, node.path);
                 this.parentOf.set(match, node);
-                this.matchById.set(match.id, match);
                 return match;
             });
         }
@@ -179,13 +158,11 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
 
     public getTreeItem(node: TreeNode): vscode.TreeItem {
         if (node.kind === 'match') {
-            const text = `line ${node.row.line + 1}`;
-            const label = node.id === this.activeMatchId
-                ? { label: text, highlights: [[0, text.length]] as [number, number][] }
-                : text;
-            const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
+            const item = new vscode.TreeItem(`line ${node.row.line + 1}`, vscode.TreeItemCollapsibleState.None);
             item.id = node.id;
             item.contextValue = 'match';
+            // Decorated like its file and folders, so the hovered line is colored too.
+            item.resourceUri = vscode.Uri.from({ scheme: 'fast-index', path: '/' + this.matchPath(node) });
             item.description = this.showContextLine ? String(node.row.text || '').trim() : undefined;
             // Deliberately no tooltip: VS Code only asks resolveTreeItem for it when the
             // pointer rests on the row, which is exactly the hover signal we need.
@@ -199,7 +176,7 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
         }
 
         if (node.kind === 'file') {
-            const item = new vscode.TreeItem(this.labelFor(node), vscode.TreeItemCollapsibleState.Expanded);
+            const item = new vscode.TreeItem(node.name, vscode.TreeItemCollapsibleState.Expanded);
             item.id = node.id;
             item.contextValue = 'file';
             item.description = String(node.rows.length);
@@ -212,7 +189,7 @@ export class ResultsTreeProvider implements vscode.TreeDataProvider<TreeNode>, v
         }
 
         // No folder icons: the tree is a result list, not a file browser.
-        const item = new vscode.TreeItem(this.labelFor(node), vscode.TreeItemCollapsibleState.Expanded);
+        const item = new vscode.TreeItem(node.name, vscode.TreeItemCollapsibleState.Expanded);
         item.id = node.id;
         item.contextValue = 'dir';
         item.description = String(node.count);
@@ -324,12 +301,16 @@ export function baseName(file: string): string {
  */
 export class ActivePathDecorationProvider implements vscode.FileDecorationProvider, vscode.Disposable {
     private active = new Set<string>();
-    private readonly emitter = new vscode.EventEmitter<undefined>();
+    private readonly emitter = new vscode.EventEmitter<vscode.Uri[] | undefined>();
     public readonly onDidChangeFileDecorations = this.emitter.event;
 
     public setActive(uris: string[]): void {
-        this.active = new Set(uris);
-        this.emitter.fire(undefined);
+        const next = new Set(uris);
+        // Repaint only what changed: rows that keep their decoration never blink.
+        const changed = [...this.active].filter((uri) => !next.has(uri))
+            .concat(uris.filter((uri) => !this.active.has(uri)));
+        this.active = next;
+        if (changed.length) this.emitter.fire(changed.map((uri) => vscode.Uri.parse(uri)));
     }
 
     public provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
@@ -337,10 +318,10 @@ export class ActivePathDecorationProvider implements vscode.FileDecorationProvid
         return { color: new vscode.ThemeColor(this.colorId()) };
     }
 
-    /** Reflects fastIndex.hoverHighlightColor, falling back to the theme default. */
+    /** Reflects fastIndex.hoverHighlightColor, falling back to the default. */
     private colorId(): string {
         const configured = vscode.workspace.getConfiguration('fastIndex').get<string>('hoverHighlightColor');
-        return configured && HIGHLIGHT_COLORS.includes(configured) ? configured : HIGHLIGHT_COLORS[0];
+        return configured && HIGHLIGHT_COLORS.includes(configured) ? configured : DEFAULT_HIGHLIGHT_COLOR;
     }
 
     /** Re-reads the color (the setting changed). */

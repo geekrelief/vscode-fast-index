@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ProjectIndexer, isFileNameMatch, fileNameRank, SearchScope } from './indexer';
-import { HIGHLIGHT_COLORS } from './resultsTree';
+import { DEFAULT_HIGHLIGHT_COLOR, HIGHLIGHT_COLORS } from './resultsTree';
 import { log } from './log';
 
 export interface PinnedSearch {
@@ -83,7 +83,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 autoOpenResults: config.get<boolean>('autoOpenResults') === true,
                 autoSearchFromResults: config.get<boolean>('autoSearchFromResults') === true,
                 showContextLine: config.get<boolean>('showContextLine') !== false,
-                hoverHighlightColor: config.get<string>('hoverHighlightColor') || 'list.highlightForeground',
+                hoverHighlightColor: config.get<string>('hoverHighlightColor') || DEFAULT_HIGHLIGHT_COLOR,
                 replaceMode: this.replaceMode,
                 pendingFields: this.pendingIndexFields()
             }
@@ -513,7 +513,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         autoOpenResults: config.get<boolean>('autoOpenResults') === true,
                         autoSearchFromResults: config.get<boolean>('autoSearchFromResults') === true,
                         showContextLine: config.get<boolean>('showContextLine') !== false,
-                        hoverHighlightColor: config.get<string>('hoverHighlightColor') || 'list.highlightForeground'
+                        hoverHighlightColor: config.get<string>('hoverHighlightColor') || DEFAULT_HIGHLIGHT_COLOR
                     };
 
                     const clampNumber = (value: unknown, fallback: number, min: number, max: number): number => {
@@ -1157,13 +1157,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         <div class="setting-item">
                             <label>Hover Highlight Color</label>
                             <select id="confHoverColor">
+                                <option value="charts.yellow">Yellow</option>
                                 <option value="list.highlightForeground">List highlight (theme default)</option>
                                 <option value="charts.blue">Blue</option>
                                 <option value="charts.green">Green</option>
                                 <option value="charts.orange">Orange</option>
                                 <option value="charts.purple">Purple</option>
                                 <option value="charts.red">Red</option>
-                                <option value="charts.yellow">Yellow</option>
                                 <option value="editorInfo.foreground">Info</option>
                             </select>
                         </div>
@@ -2231,7 +2231,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                             if (confAutoOpenResults) confAutoOpenResults.checked = message.value.autoOpenResults === true;
                             if (confAutoSearchResults) confAutoSearchResults.checked = message.value.autoSearchFromResults === true;
                             if (confShowContextLine) confShowContextLine.checked = message.value.showContextLine !== false;
-                        if (confHoverColor) confHoverColor.value = message.value.hoverHighlightColor || 'list.highlightForeground';
+                        if (confHoverColor) confHoverColor.value = message.value.hoverHighlightColor || 'charts.yellow';
                             const showContext = message.value.showContextLine !== false;
                             if (showContext !== showContextLine) {
                                 showContextLine = showContext;

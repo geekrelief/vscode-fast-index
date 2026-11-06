@@ -52,7 +52,7 @@ Three of these settings shape the index itself: **Include Extensions**, **Exclud
 * **Panel Font Size (px):** Text size for the panel — search results, pinned searches, buttons — default `14`, range `9`–`24`. Everything in the panel scales from it, and the change is visible as you type.
 * **Hover jump timing** follows VS Code's own `workbench.hover.delay`; the extension no longer has a delay setting of its own.
 * **Results Context Lines:** Lines shown above and below each match in the results editor (default `2`).
-* **Hover Highlight Color:** which theme color marks the hovered result's file and folders in the results tree — the list highlight (default), or the theme's chart blue/green/orange/purple/red/yellow, or its info foreground. Also `fastIndex.hoverHighlightColor`.
+* **Hover Highlight Color:** which theme color marks the hovered result's line, its file and its folders in the results tree — theme chart **yellow** by default, or the list highlight / chart blue, green, orange, purple, red, or the info foreground. Also `fastIndex.hoverHighlightColor`.
 * **Keep pinned searches between sessions:** on/off (default on).
 * **Open the results editor automatically:** on/off (default off, also `fastIndex.autoOpenResults`). When on, a search that finds matches reopens the results tab if you closed it — without stealing focus, so you can keep typing in the panel.
 * **Auto Search: Follows text editor cursor and selection:** on/off.
@@ -83,7 +83,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog
 
-### 0.8.0 → 0.18.1 — native results tree, hover jump, pinned section, results editor and settings fixes
+### 0.8.0 → 0.18.2 — native results tree, hover jump, pinned section, results editor and settings fixes
 
 #### Results tab in the editor
 
@@ -142,7 +142,7 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 * **Replace moved to the title bar.** The in-panel Replace button is gone; a `$(replace)` button in the view title toggles replace mode, which shows the *Replace with…* field under *Skip* plus Replace All.
 * **Settings no longer trap you.** Opening the settings switches the panel body to scrollable (`body.settings-open`), expands it to its content height and scrolls the settings into view, so every group is reachable even when the results section below is tall.
-* **`fastIndex.hoverHighlightColor`** picks the theme color used for the hover highlight, both as a setting and as a dropdown in the panel settings.
+* **`fastIndex.hoverHighlightColor`** picks the theme color used for the hover highlight (default `charts.yellow`), both as a setting and as a themed dropdown in the panel settings. Colour is applied as a file decoration, and only the rows whose decoration actually changes are repainted — the tree itself is never refreshed, so rows no longer flash their undecorated color first.
 
 #### Panel access
 
