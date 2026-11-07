@@ -88,9 +88,10 @@ export class ResultsView implements vscode.Disposable {
 
     /**
      * Called whenever the panel produces new results or changes its layout.
-     * `autoOpen` mirrors the `fastIndex.autoOpenResults` setting: when the tab
-     * was closed, a search opens it again — without stealing focus from the
-     * panel the user is typing in.
+     * `autoOpen` mirrors the `fastIndex.autoOpenResults` setting: a search makes the tab
+     * visible — it opens it when closed, and brings an existing tab in front when the user
+     * has switched to another document — without stealing keyboard focus from wherever the
+     * search came from.
      */
     public async sync(autoOpen: boolean): Promise<void> {
         if (this.opening) {
@@ -100,6 +101,7 @@ export class ResultsView implements vscode.Disposable {
         }
         if (this.isOpen()) {
             await this.refresh();
+            if (autoOpen && !this.isActiveTab()) await this.surface();
             return;
         }
         if (!autoOpen) return;
@@ -111,6 +113,23 @@ export class ResultsView implements vscode.Disposable {
         if (this.syncQueued) {
             this.syncQueued = false;
             await this.sync(false);
+        }
+    }
+
+    /** True when the results tab is the visible tab of the active group. */
+    private isActiveTab(): boolean {
+        const target = ResultsDocumentProvider.uri.toString();
+        const input = vscode.window.tabGroups.activeTabGroup?.activeTab?.input;
+        return input instanceof vscode.TabInputText && input.uri.toString() === target;
+    }
+
+    /** Brings an already-open results tab to the front without moving keyboard focus. */
+    private async surface(): Promise<void> {
+        try {
+            const document = await vscode.workspace.openTextDocument(ResultsDocumentProvider.uri);
+            await vscode.window.showTextDocument(document, { preview: false, preserveFocus: true });
+        } catch {
+            /* the tab went away between the check and the call */
         }
     }
 
