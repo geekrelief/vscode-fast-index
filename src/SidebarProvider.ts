@@ -37,14 +37,102 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private promptedIndexSignature = '';
     private _statusText = 'Starting…';
     private _statusState: 'busy' | 'ready' | 'idle' = 'busy';
+    /** True while an index build owns the index (mirrors the status, and the indexer). */
+    private indexing = false;
+    /** The last search requested while indexing, replayed when the build ends. */
+    private deferredSearch?: { value: string; isMatchCase: boolean; isRegex: boolean; include: string[]; exclude: string[]; filter: string; reason: string };
 
     public setStatus(text: string, state: 'busy' | 'ready' | 'idle' = 'busy'): void {
         this._statusText = text;
         this._statusState = state;
         // The status lives in the view title bar, not in a row of its own.
         this.updateViewDescription();
+
+        const wasIndexing = this.indexing;
+        this.indexing = state === 'busy';
+        if (this.indexing && !wasIndexing) {
+            // A build is starting: a search in flight is reading an index that is about
+            // to be rewritten (a forced rebuild resets it first), so drop its result.
+            this.searchGeneration++;
+            log('index build started: in-flight search cancelled');
+        } else if (!this.indexing && wasIndexing) {
+            // The index changed under the results on screen; refresh them once the build
+            // has really finished (its progress status arrives before `isIndexing` drops).
+            this.scheduleSearchResume();
+        }
+
         // Indexing disables the controls that would change the index underneath it.
         void this.postToViews({ type: 'busy', value: state === 'busy', message: text });
+    }
+
+    /**
+     * Runs a search, or parks it while the index is being built. A build rewrites the
+     * very tables a search intersects, and a forced rebuild clears them first, so a
+     * query answered mid-build would be wrong rather than merely stale.
+     */
+    private async runSearch(data: any): Promise<void> {
+        if (this.indexing || this.indexer.isBuilding) {
+            this.deferredSearch = data;
+            log(`search "${data.value}" deferred until the index build finishes`);
+            return;
+        }
+
+        const { value, isMatchCase, isRegex, include, exclude, filter, reason } = data;
+        if (!value || (!isRegex && value.length < 3)) {
+            this.postToViews({ type: 'results', value: [] });
+            return;
+        }
+        const generation = ++this.searchGeneration;
+        const startedAt = Date.now();
+        const files = this.indexer.search(value, isRegex, { include, exclude });
+        const indexMs = Date.now() - startedAt;
+        const snippets = await this.getSnippets(
+            files, value, isMatchCase, isRegex, filter,
+            () => generation !== this.searchGeneration,
+            rows => {
+                if (generation !== this.searchGeneration) return;
+                this.postToViews({ type: 'results', value: rows });
+            });
+        if (generation !== this.searchGeneration) {
+            log(`search "${value}" superseded by a newer search or an index build`);
+            return;
+        }
+        log(`search "${value}" reason=${reason || 'unknown'} case=${!!isMatchCase} regex=${!!isRegex} include=[${(include || []).join(',')}] exclude=[${(exclude || []).join(',')}] filter="${filter || ''}" -> ${files.length} files, ${snippets.length} rows in ${Date.now() - startedAt} ms (index ${indexMs} ms)`);
+        this.lastSnapshot = { query: value, isRegex: !!isRegex, isMatchCase: !!isMatchCase, filter: filter || '', include: include || [], exclude: exclude || [], rows: snippets };
+        this.postToViews({ type: 'results', value: snippets });
+        this.onResults?.(this.lastSnapshot, 'search');
+    }
+
+    /** Replays the search the user asked for while indexing, then refreshes the list. */
+    private scheduleSearchResume(): void {
+        setTimeout(() => void this.resumeSearch(), 0);
+    }
+
+    private async resumeSearch(): Promise<void> {
+        // The ready status is published before the indexer clears its flag: wait for it.
+        if (this.indexing || this.indexer.isBuilding) {
+            setTimeout(() => void this.resumeSearch(), 200);
+            return;
+        }
+
+        const pending = this.deferredSearch;
+        this.deferredSearch = undefined;
+        if (pending) {
+            await this.runSearch(pending);
+            return;
+        }
+        // Nothing new was typed: re-run what is on screen so it matches the new index.
+        const snapshot = this.lastSnapshot;
+        if (!snapshot || !snapshot.query) return;
+        await this.runSearch({
+            value: snapshot.query,
+            isMatchCase: snapshot.isMatchCase,
+            isRegex: snapshot.isRegex,
+            include: snapshot.include,
+            exclude: snapshot.exclude,
+            filter: snapshot.filter,
+            reason: 'reindex'
+        });
     }
 
     /** Cancels a running build; the previous index is kept. */
@@ -598,33 +686,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         const handler = async (data: any): Promise<void> => {
             switch (data.type) {
                 case 'search': {
-                    const { value, isMatchCase, isRegex, include, exclude, filter, reason } = data;
-                    if (!value || (!isRegex && value.length < 3)) {
-                        this.postToViews({ type: 'results', value: [] });
-                        return;
-                    }
-                    const generation = ++this.searchGeneration;
-                    const startedAt = Date.now();
-                    const files = this.indexer.search(value, isRegex, { include, exclude });
-                    const indexMs = Date.now() - startedAt;
-                    const snippets = await this.getSnippets(
-                        files, value, isMatchCase, isRegex, filter,
-                        () => generation !== this.searchGeneration,
-                        rows => {
-                            if (generation !== this.searchGeneration) return;
-                            this.postToViews({ type: 'results', value: rows });
-                        });
-                    if (generation !== this.searchGeneration) {
-                        log(`search "${value}" superseded by a newer search`);
-                        return;
-                    }
-                    log(`search "${value}" reason=${reason || 'unknown'} case=${!!isMatchCase} regex=${!!isRegex} include=[${(include || []).join(',')}] exclude=[${(exclude || []).join(',')}] filter="${filter || ''}" -> ${files.length} files, ${snippets.length} rows in ${Date.now() - startedAt} ms (index ${indexMs} ms)`);
-                    this.lastSnapshot = { query: value, isRegex: !!isRegex, isMatchCase: !!isMatchCase, filter: filter || '', include: include || [], exclude: exclude || [], rows: snippets };
-                    this.postToViews({ type: 'results', value: snippets });
-                    this.onResults?.(this.lastSnapshot, 'search');
+                    await this.runSearch(data);
                     break;
                 }
                 case 'replaceSingle': {
+                    if (this.refuseWhileBuilding('replacing')) break;
                     const { file, line, query, replaceText, isMatchCase, isRegex, include, exclude, filter } = data.value;
                     await this.replaceInFile(file, line, query, replaceText, isMatchCase, isRegex);
                     const files = this.indexer.search(query, isRegex, { include, exclude });
@@ -635,6 +701,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     break;
                 }
                 case 'replaceAll': {
+                    if (this.refuseWhileBuilding('replacing')) break;
                     const { results, query, replaceText, isMatchCase, isRegex, include, exclude, filter } = data.value;
                     await this.replaceAllInFiles(results, query, replaceText, isMatchCase, isRegex);
                     const files = this.indexer.search(query, isRegex, { include, exclude });
