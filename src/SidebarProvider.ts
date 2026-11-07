@@ -24,6 +24,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
     private prefillTimer?: ReturnType<typeof setTimeout>;
     private suppressPrefillUntil = 0;
+    /** Document URI last seen open as a real tab, so the auxiliary-editor check stays cheap. */
+    private knownTabEditorUri = '';
     /** Where the user last put the caret, so opening the panel can tell that from an open at 0,0. */
     private lastUserCursor?: { uri: string; line: number; character: number };
     private lockNoticed = false;
@@ -282,9 +284,35 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         );
     }
 
+    /**
+     * True for editors that are navigation aids rather than the file being worked on: a peek
+     * widget, the output pane. A peek has no column and is not a tab. Following its cursor
+     * would search for whatever word it lands on and, with auto-open on, replace the results
+     * tab the user was reading.
+     */
+    private isAuxiliaryEditor(editor: vscode.TextEditor): boolean {
+        if (editor.viewColumn === undefined) return true;
+
+        const target = editor.document.uri.toString();
+        // Selection events fire on every keystroke; the tab scan is only needed once per editor.
+        if (target === this.knownTabEditorUri) return false;
+
+        const isTab = vscode.window.tabGroups.all.some(group => group.tabs.some(tab => {
+            const input = tab.input;
+            if (input instanceof vscode.TabInputText) return input.uri.toString() === target;
+            if (input instanceof vscode.TabInputTextDiff) {
+                return input.original.toString() === target || input.modified.toString() === target;
+            }
+            return false;
+        }));
+        if (isTab) this.knownTabEditorUri = target;
+        return !isTab;
+    }
+
     /** Tracks where the user last clicked, so opening the panel can tell that from a file open. */
     private onEditorSelection(event: vscode.TextEditorSelectionChangeEvent): void {
         if (event.textEditor !== vscode.window.activeTextEditor) return;
+        if (this.isAuxiliaryEditor(event.textEditor)) return;
         // Opening a file parks the cursor at 0,0 and fires a "Command" selection change, and
         // restoring focus (closing a tab, leaving the panel) fires one with no kind at all.
         // Only pointer and keyboard moves are the user pointing at a word.
@@ -733,6 +761,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
         const editor = vscode.window.activeTextEditor;
         if (!editor) return;
+        if (this.isAuxiliaryEditor(editor)) return;
         // Never seed the query from our own generated views (output, settings, …). The
         // results editor counts too, unless the user opted into Auto Search from it.
         const scheme = editor.document.uri.scheme;
@@ -2399,3 +2428,4 @@ vscode.postMessage({ type: 'getCaches' });
         `;
     }
 }
+
