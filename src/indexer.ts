@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as zlib from 'zlib';
 import * as crypto from 'crypto';
 import { computeTrigrams, queryTrigrams } from './trigrams';
+import { log } from './log';
 
 export interface CacheLoadResult {
     status: 'loaded' | 'partial' | 'missing';
@@ -564,6 +565,7 @@ export class ProjectIndexer {
     // ---- loading -----------------------------------------------------------------
 
     public async loadFromDisk(): Promise<CacheLoadResult> {
+        const started = Date.now();
         this.onProgress?.('Loading index…');
 
         const missingRoots: string[] = [];
@@ -595,7 +597,9 @@ export class ProjectIndexer {
             : (loaded > 0 ? 'partial' : 'missing');
 
         if (loaded > 0) {
-            this.onProgress?.(`Loaded ${this.fileIdOf.size.toLocaleString()} files`, false);
+            const summary = `${this.fileIdOf.size.toLocaleString()} files · ${this.trigrams.length.toLocaleString()} terms`;
+            this.onProgress?.(`Ready · ${summary}`, false);
+            log(`loaded ${summary} · ${(bytes / 1048576).toFixed(1)} MB in ${Date.now() - started} ms`);
         }
 
         return { status, fileCount: this.fileIdOf.size, bytes, missingRoots, corruptRoots };
@@ -961,7 +965,8 @@ export class ProjectIndexer {
                                 processed += count;
                                 progress.report({
                                     increment: (100 * count) / total,
-                                    message: `Processed ${processed.toLocaleString()} of ${total.toLocaleString()}`
+                                    message: `Processed ${processed.toLocaleString()} of ${total.toLocaleString()}` +
+                                        ` · ${this.trigrams.length.toLocaleString()} terms`
                                 });
                             }
                         );
@@ -981,21 +986,25 @@ export class ProjectIndexer {
                     }
 
                     const needsSave = force || changed > 0 || removed > 0 || this.overlay.size > 0;
+                    let savedBytes = 0;
                     if (needsSave) {
                         this.onProgress?.(`Saving ${selected.length} folder${selected.length === 1 ? '' : 's'}…`);
                         progress.report({ message: 'Saving index…' });
-                        await this.saveToDisk(selected);
+                        savedBytes = await this.saveToDisk(selected);
                         // Reload so the in-memory index matches the file exactly.
                         await this.reloadAll();
                     }
 
-                    this.onProgress?.(`Ready · ${this.fileIdOf.size.toLocaleString()} files`, false);
+                    const summary = `${this.fileIdOf.size.toLocaleString()} files · ${this.trigrams.length.toLocaleString()} terms`;
+                    this.onProgress?.(`Ready · ${summary}`, false);
                     const note = skipped > 0 ? `, ${skipped.toLocaleString()} unchanged` : '';
+                    log(`indexed ${summary}${savedBytes > 0 ? ` · ${(savedBytes / 1048576).toFixed(1)} MB on disk` : ''}` +
+                        (changed > 0 ? ` · ${changed.toLocaleString()} updated` : '') + note);
                     if (!needsSave) {
-                        vscode.window.showInformationMessage(`Fast Index: already up to date (${this.fileIdOf.size.toLocaleString()} files${note}).`);
+                        vscode.window.showInformationMessage(`Fast Index: already up to date (${this.fileIdOf.size.toLocaleString()} files, ${this.trigrams.length.toLocaleString()} terms${note}).`);
                     } else {
                         vscode.window.showInformationMessage(
-                            `Fast Index ready: ${this.fileIdOf.size.toLocaleString()} files, ${this.trigrams.length.toLocaleString()} trigrams` +
+                            `Fast Index ready: ${this.fileIdOf.size.toLocaleString()} files, ${this.trigrams.length.toLocaleString()} terms` +
                             (changed > 0 ? `, ${changed.toLocaleString()} updated` : '') + note + '.'
                         );
                     }

@@ -98,6 +98,15 @@ The trade is real and legible: **2.8× disk, +1 s startup, 1.7× build — for t
 One thing that did **not** change: regex queries still cannot be pruned (`search()` returns
 every indexed file for `isRegex`), and case-insensitive-only matching is unchanged.
 
+## Seeing the term count
+
+The number is reported in four places now: the indexing notification
+(Processed 12,345 of 137,016 · 512,340 terms), the view-title status
+(137,016 files · 873,275 terms), the completion toast, and the **Fast Index** output
+channel (Fast Index: Show Search Log), which logs both loaded … at startup and
+indexed … · 91.1 MB on disk after a build. Roughly 873k terms means the whole-text
+build produced the cache; ~50k means a word-split one did.
+
 ## Reproduce
 
 ```powershell
@@ -110,4 +119,5 @@ node bench/test-whole-text-trigrams.js
 
 `bench/build-index.js --extractor=words` rebuilds with the previous selection, which is the
 control that reproduced the stored index.
+
 

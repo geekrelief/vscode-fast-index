@@ -230,7 +230,10 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 
     if (pendingRoots.length === 0) {
-        sidebarProvider.setStatus(`Ready · ${cache.fileCount.toLocaleString()} files`, 'ready');
+        sidebarProvider.setStatus(
+            `Ready · ${cache.fileCount.toLocaleString()} files · ${indexer.trigramCount.toLocaleString()} terms`,
+            'ready'
+        );
         if (!hasIndexedBefore && cache.status === 'loaded') {
             await context.workspaceState.update(INDEXED_FLAG, true);
         }
