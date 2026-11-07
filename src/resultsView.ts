@@ -396,6 +396,11 @@ export class ResultsView implements vscode.Disposable {
         if (kind !== vscode.TextEditorSelectionChangeKind.Mouse) return;
         if (selections.length !== 1 || !selections[0].isEmpty) return;
 
+        // A click here navigates somewhere — our Follow link, VS Code's own definition, or the
+        // peek below. Whatever it lands on in a file is not a new query, so keep the caret it
+        // leaves out of the search box for a moment, whichever handler opens the file.
+        this.onFollowNavigate?.('', -1);
+
         const line = selections[0].active.line;
         if (line >= textEditor.document.lineCount) return;
         const text = textEditor.document.lineAt(line).text;
@@ -421,6 +426,7 @@ export class ResultsView implements vscode.Disposable {
         this.disposables.length = 0;
     }
 }
+
 
 
 

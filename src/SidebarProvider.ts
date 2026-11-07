@@ -50,7 +50,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
      */
     public noteFollow(file: string, line: number): void {
         this.suppressPrefillUntil = Math.max(this.suppressPrefillUntil, Date.now() + 1200);
-        this.lastFollow = { file, line, at: Date.now() };
+        // No file: a click in the results tab that we did not route ourselves (VS Code's own
+        // definition provider handled it), so pause without pinning a particular caret.
+        if (file) this.lastFollow = { file, line, at: Date.now() };
     }
 
     /** Puts a compact status next to the view title, so the panel keeps that height. */
@@ -331,6 +333,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         const kind = event.kind;
         if (kind !== vscode.TextEditorSelectionChangeKind.Mouse
             && kind !== vscode.TextEditorSelectionChangeKind.Keyboard) return;
+        // A caret that a Follow link just placed arrives as a mouse selection too. Recording it
+        // would make it look deliberate later, and reopening the panel would then seed the box
+        // from the line the user followed — the query they were already looking at.
+        if (Date.now() < this.suppressPrefillUntil) return;
         const active = event.selections[0]?.active;
         if (active) {
             this.lastUserCursor = {
@@ -2476,6 +2482,7 @@ vscode.postMessage({ type: 'getCaches' });
         `;
     }
 }
+
 
 
 
