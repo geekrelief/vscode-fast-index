@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as zlib from 'zlib';
 import * as crypto from 'crypto';
-import { computeTrigrams } from './trigrams';
+import { computeTrigrams, queryTrigrams } from './trigrams';
 
 export interface CacheLoadResult {
     status: 'loaded' | 'partial' | 'missing';
@@ -54,11 +54,14 @@ export interface CacheEntry {
  * load time, only the small tables are read. Posting lists are decoded on demand
  * for the handful of trigrams a query actually needs.
  */
-const SEGMENT_MAGIC = 'VFI4';
-const SEGMENT_VERSION = 4;
-const LEGACY_SEGMENT_MAGIC = 'VFI3';
+const SEGMENT_MAGIC = 'VFI5';
+const SEGMENT_VERSION = 5;
+/** VFI4 and older stored word-split trigrams, which cannot answer whole-text queries. */
+const STALE_SEGMENT_MAGICS = ['VFI4', 'VFI3'];
 const LEGACY_JSON_FILE = 'fast-index-cache.json';
 const EMPTY_POSTINGS = new Uint32Array(0);
+/** Terms per segment addressable by the packed (segment, local) id above. */
+const TERMS_PER_SEGMENT = 0x100000;
 const DECODE_CACHE_LIMIT = 2048;
 
 function normalizePath(p: string): string {
@@ -308,8 +311,8 @@ interface Segment {
 interface RootInfo {
     path: string;
     cacheFile: string;
-    /** Segment written by 0.1.x, migrated on first load. */
-    legacyFile: string;
+    /** Segments in the old word-split format: deleted, never read. */
+    staleFiles: string[];
 }
 
 interface BuildPlan {
@@ -329,7 +332,7 @@ export class ProjectIndexer {
 
     private trigrams: string[] = [];
     private trigramIdOf = new Map<string, number>();
-    /** global trigram id -> packed (segmentIndex * 65536 + local trigram id) */
+    /** global trigram id -> packed (segmentIndex * TERMS_PER_SEGMENT + local term id) */
     private sources: (number[] | undefined)[] = [];
     private segments: Segment[] = [];
 
@@ -392,10 +395,13 @@ export class ProjectIndexer {
             if (seen.has(key)) continue;
             seen.add(key);
             const hash = crypto.createHash('sha1').update(key).digest('hex').slice(0, 20);
+            const dir = this.segmentDir;
             this.roots.push({
                 path: rootPath,
-                cacheFile: this.segmentDir ? path.join(this.segmentDir, `root-${hash}.v4.bin`) : '',
-                legacyFile: this.segmentDir ? path.join(this.segmentDir, `root-${hash}.v3.bin`) : '',
+                cacheFile: dir ? path.join(dir, `root-${hash}.v5.bin`) : '',
+                staleFiles: dir
+                    ? ['.v4.bin', '.v3.bin'].map(suffix => path.join(dir, `root-${hash}${suffix}`))
+                    : [],
             });
         }
     }
@@ -530,8 +536,9 @@ export class ProjectIndexer {
     }
 
     private decodeEntry(packed: number): Uint32Array {
-        const segment = this.segments[(packed / 65536) | 0];
-        const local = packed & 0xffff;
+        const segmentIndex = (packed / TERMS_PER_SEGMENT) | 0;
+        const segment = this.segments[segmentIndex];
+        const local = packed - segmentIndex * TERMS_PER_SEGMENT;
         const count = segment.counts[local];
         const out = new Uint32Array(count);
         const buffer = segment.buffer;
@@ -611,13 +618,11 @@ export class ProjectIndexer {
     }
 
     private async loadSegment(root: RootInfo, rootIndex: number): Promise<{ status: string; bytes: number }> {
-        let source = root.cacheFile;
+        const source = root.cacheFile;
         if (!source || !fs.existsSync(source)) {
-            if (root.legacyFile && fs.existsSync(root.legacyFile)) {
-                source = root.legacyFile;
-            } else {
-                return { status: 'missing', bytes: 0 };
-            }
+            // A segment in the old word-split format cannot answer whole-text queries.
+            await this.dropStaleSegments(root);
+            return { status: 'missing', bytes: 0 };
         }
 
         let raw: Buffer;
@@ -633,18 +638,11 @@ export class ProjectIndexer {
             });
 
             const magic = buffer.toString('ascii', 0, 4);
-            if (magic === LEGACY_SEGMENT_MAGIC) {
-                // One-time upgrade from the eager format: rewrite as VFI4, then read that.
-                await this.migrateLegacySegment(root, buffer);
-                // Carry pending edits over so they are not lost in the conversion.
-                const legacyJournal = `${source}.journal`;
-                if (fs.existsSync(legacyJournal) && !fs.existsSync(`${root.cacheFile}.journal`)) {
-                    await fs.promises.rename(legacyJournal, `${root.cacheFile}.journal`).catch(() => undefined);
-                }
-                await fs.promises.unlink(source).catch(() => undefined);
-                return this.loadSegment(root, rootIndex);
-            }
             if (buffer.length < 28 || magic !== SEGMENT_MAGIC) {
+                if (STALE_SEGMENT_MAGICS.includes(magic)) {
+                    await fs.promises.unlink(source).catch(() => undefined);
+                    return { status: 'missing', bytes: 0 };
+                }
                 return { status: 'corrupt', bytes: raw.length };
             }
             if (buffer.readUInt32LE(4) !== SEGMENT_VERSION) {
@@ -696,7 +694,7 @@ export class ProjectIndexer {
                     list = [];
                     this.sources[trigramId] = list;
                 }
-                list.push(segmentIndex * 65536 + t);
+                list.push(segmentIndex * TERMS_PER_SEGMENT + t);
                 // A later segment extends this trigram's postings: drop any cached decode.
                 // (Journal replay runs between segment loads, so the cache can be warm already.)
                 this.decoded.delete(trigramId);
@@ -709,61 +707,20 @@ export class ProjectIndexer {
         }
     }
 
-    /** Converts a VFI3 segment (eager, no index table, no mtimes) into VFI4. */
-    private async migrateLegacySegment(root: RootInfo, buffer: Buffer): Promise<void> {
-        const fileCount = buffer.readUInt32LE(8);
-        const trigramCount = buffer.readUInt32LE(12);
-        let offset = 20;
-        const rootLen = buffer.readUInt32LE(16);
-        offset += rootLen + 8;
-
-        const paths: string[] = new Array(fileCount);
-        for (let i = 0; i < fileCount; i++) {
-            const len = buffer.readUInt32LE(offset);
-            offset += 4;
-            paths[i] = buffer.toString('utf8', offset, offset + len);
-            offset += len;
-        }
-
-        const trigramBase = offset;
-        offset += trigramCount * 3;
-        offset = (offset + 3) & ~3;
-
-        const names: string[] = new Array(trigramCount);
-        const postings: Uint32Array[] = new Array(trigramCount);
-        for (let t = 0; t < trigramCount; t++) {
-            const base = trigramBase + t * 3;
-            names[t] = buffer.toString('ascii', base, base + 3);
-            const count = buffer.readUInt32LE(offset);
-            offset += 4;
-            const ids = new Uint32Array(count);
-            let fileId = 0;
-            for (let k = 0; k < count; k++) {
-                let byte = buffer[offset++];
-                let delta = byte & 0x7f;
-                let shift = 7;
-                while ((byte & 0x80) !== 0) {
-                    byte = buffer[offset++];
-                    delta |= (byte & 0x7f) << shift;
-                    shift += 7;
-                }
-                fileId += delta;
-                ids[k] = fileId;
+    /** Removes segments this build cannot read, plus their journals. */
+    private async dropStaleSegments(root: RootInfo): Promise<void> {
+        for (const file of root.staleFiles) {
+            try {
+                await fs.promises.unlink(file);
+            } catch {
+                /* nothing to drop */
             }
-            postings[t] = ids;
+            try {
+                await fs.promises.unlink(`${file}.journal`);
+            } catch {
+                /* nothing to drop */
+            }
         }
-
-        const mtimes = new Float64Array(fileCount);
-        const sizes = new Uint32Array(fileCount);
-        await writeSegmentFile(
-            root.cacheFile,
-            root.path,
-            paths,
-            mtimes,
-            sizes,
-            names,
-            (i) => postings[i]
-        );
     }
 
     // ---- saving ------------------------------------------------------------------
@@ -1175,17 +1132,15 @@ export class ProjectIndexer {
         const lowerQuery = query.toLowerCase();
 
         const queryTrigramIds: number[] = [];
-        const words = lowerQuery.split(/\W+/).filter(w => w.length >= 3);
-        let expectedTrigrams = 0;
-        for (const word of words) {
-            for (let i = 0; i <= word.length - 3; i++) {
-                expectedTrigrams++;
-                const id = this.trigramIdOf.get(word.substring(i, i + 3));
-                if (id !== undefined) queryTrigramIds.push(id);
-            }
+        // Same windows the index stored for a file, so a phrase prunes as a phrase.
+        const trigrams = queryTrigrams(lowerQuery);
+        const expectedTrigrams = trigrams.length;
+        for (const trigram of trigrams) {
+            const id = this.trigramIdOf.get(trigram);
+            if (id !== undefined) queryTrigramIds.push(id);
         }
 
-        // Special-character-only queries (e.g. "$$$" or "()=>") cannot be pruned.
+        // Queries too short (or too non-ASCII) to have a single window cannot be pruned.
         if (expectedTrigrams === 0) {
             return rankByFileName(this.allIndexedFiles(allow), lowerQuery);
         }
@@ -1274,7 +1229,7 @@ export class ProjectIndexer {
         if (!this.segmentDir) return [];
         let names: string[];
         try {
-            names = (await fs.promises.readdir(this.segmentDir)).filter(name => name.startsWith('root-') && /\.v[34]\.bin$/.test(name));
+            names = (await fs.promises.readdir(this.segmentDir)).filter(name => name.startsWith('root-') && /\.v[345]\.bin$/.test(name));
         } catch {
             return [];
         }
@@ -1365,7 +1320,7 @@ async function readSegmentHeader(file: string): Promise<{ root: string; builtAt:
 
         if (inflated.length < 28) return null;
         const magic = inflated.toString('ascii', 0, 4);
-        if (magic !== SEGMENT_MAGIC && magic !== LEGACY_SEGMENT_MAGIC) return null;
+        if (magic !== SEGMENT_MAGIC && !STALE_SEGMENT_MAGICS.includes(magic)) return null;
         const rootLen = inflated.readUInt32LE(16);
         if (inflated.length < 20 + rootLen + 8) return null;
         return {
@@ -1489,3 +1444,4 @@ async function writeSegmentFile(
     await fs.promises.rename(tmp, file);
     return compressed.length;
 }
+
