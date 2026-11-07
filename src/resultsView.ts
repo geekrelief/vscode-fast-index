@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as vscode from 'vscode';
 import { log } from './log';
 import {
@@ -182,7 +183,7 @@ export class ResultsView implements vscode.Disposable {
 
     private async render(snapshot: ResultsSnapshot): Promise<string> {
         const startedAt = Date.now();
-        let documentsRead = 0;
+        let filesRead = 0;
         const configured = vscode.workspace.getConfiguration('fastIndex').get<number>('resultContextLines');
         const radius = Math.max(0, Math.min(50, Math.round(typeof configured === 'number' ? configured : 2)));
 
@@ -194,10 +195,14 @@ export class ResultsView implements vscode.Disposable {
 
             let lines: string[] = [];
             try {
+                // Prefer a live buffer (unsaved edits must show up), but never call
+                // openTextDocument just to read a few context lines: that loads the file
+                // into the document model and hands it to every language server for the
+                // workspace, which costs far more than reading it from disk.
                 const open = vscode.workspace.textDocuments.find(document => document.uri.fsPath === file);
-                const document = open ?? await vscode.workspace.openTextDocument(vscode.Uri.file(file));
-                lines = document.getText().split('\n');
-                documentsRead++;
+                const text = open ? open.getText() : await fs.promises.readFile(file, 'utf8');
+                lines = text.split('\n');
+                filesRead++;
             } catch {
                 lines = [];
             }
@@ -207,7 +212,7 @@ export class ResultsView implements vscode.Disposable {
 
         const built = await buildResultsText(snapshot, rows, radius, readSource);
         this.matchLines = built.matchLines;
-        log(`results render ${rows.length} rows from ${documentsRead} documents in ${Date.now() - startedAt} ms`);
+        log(`results render ${rows.length} rows from ${filesRead} files in ${Date.now() - startedAt} ms`);
         return built.text;
     }
 
@@ -257,4 +262,5 @@ export class ResultsView implements vscode.Disposable {
         this.disposables.length = 0;
     }
 }
+
 
