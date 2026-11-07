@@ -374,13 +374,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         return;
                     }
                     const generation = ++this.searchGeneration;
+                    const startedAt = Date.now();
                     const files = this.indexer.search(value, isRegex, { include, exclude });
+                    const indexMs = Date.now() - startedAt;
                     const snippets = await this.getSnippets(files, value, isMatchCase, isRegex, filter, () => generation !== this.searchGeneration);
                     if (generation !== this.searchGeneration) {
                         log(`search "${value}" superseded by a newer search`);
                         return;
                     }
-                    log(`search "${value}" reason=${reason || 'unknown'} case=${!!isMatchCase} regex=${!!isRegex} include=[${(include || []).join(',')}] exclude=[${(exclude || []).join(',')}] filter="${filter || ''}" -> ${files.length} files, ${snippets.length} rows`);
+                    log(`search "${value}" reason=${reason || 'unknown'} case=${!!isMatchCase} regex=${!!isRegex} include=[${(include || []).join(',')}] exclude=[${(exclude || []).join(',')}] filter="${filter || ''}" -> ${files.length} files, ${snippets.length} rows in ${Date.now() - startedAt} ms (index ${indexMs} ms)`);
                     this.lastSnapshot = { query: value, isRegex: !!isRegex, isMatchCase: !!isMatchCase, filter: filter || '', include: include || [], exclude: exclude || [], rows: snippets };
                     this.postToViews({ type: 'results', value: snippets });
                     this.onResults?.(this.lastSnapshot, 'search');
