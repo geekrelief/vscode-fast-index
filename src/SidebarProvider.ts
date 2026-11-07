@@ -24,6 +24,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
     private prefillTimer?: ReturnType<typeof setTimeout>;
     private suppressPrefillUntil = 0;
+    /** Where the last Follow link landed, so that caret is not mistaken for a new query. */
+    private lastFollow?: { file: string; line: number; at: number };
     /** Document URI last seen open as a real tab, so the auxiliary-editor check stays cheap. */
     private knownTabEditorUri = '';
     /** Where the user last put the caret, so opening the panel can tell that from an open at 0,0. */
@@ -42,15 +44,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Ignores editor prefills for a moment. Used when a navigation moved the caret — a
-     * follow link from the results tab selects the hit, and that selection is not a query.
+     * A follow link just placed the caret at `file:line` (`line` < 0: anywhere in that file).
+     * Editor prefills pause, and the exact cursor the link left behind is ignored afterwards —
+     * taking the word under it would replace the query that produced the results.
      */
-    public pausePrefill(ms: number): void {
-        this.suppressPrefillUntil = Math.max(this.suppressPrefillUntil, Date.now() + ms);
+    public noteFollow(file: string, line: number): void {
+        this.suppressPrefillUntil = Math.max(this.suppressPrefillUntil, Date.now() + 1200);
+        this.lastFollow = { file, line, at: Date.now() };
     }
 
     /** Puts a compact status next to the view title, so the panel keeps that height. */
-    private updateViewDescription(): void {        if (!this._view) return;
+    private updateViewDescription(): void {
+        if (!this._view) return;
         const compact = this._statusText
             .replace(/^Ready\s*·\s*/i, '')
             .replace(/\s+/g, ' ')
@@ -779,6 +784,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
         const document = editor.document;
         const selection = editor.selection;
+
+        // The caret a Follow link left behind is navigation, not a new term: taking the word
+        // under it would replace the query whose results the user is clicking through.
+        const followed = this.lastFollow;
+        if (followed && Date.now() - followed.at < 3000
+            && followed.file.toLowerCase() === document.uri.fsPath.toLowerCase()
+            && (followed.line < 0 || followed.line === selection.active.line)) {
+            log('prefill skipped: cursor is where a Follow link landed');
+            return;
+        }
         let text = '';
 
         if (!selection.isEmpty) {
@@ -2435,4 +2450,6 @@ vscode.postMessage({ type: 'getCaches' });
         `;
     }
 }
+
+
 

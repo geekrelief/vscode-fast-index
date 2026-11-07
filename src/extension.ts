@@ -85,7 +85,7 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push({ dispose: () => resultsView.dispose() }, ...resultsView.register());
     // A follow link moves the file into the neighbouring group; the caret it lands on is
     // navigation, so the panel must not adopt it as the next query.
-    resultsView.onFollowNavigate = () => sidebarProvider.pausePrefill(700);
+    resultsView.onFollowNavigate = (file, line) => sidebarProvider.noteFollow(file, line);
     context.subscriptions.push(resultsTreeView, { dispose: () => resultsTree.dispose() });
 
     // Colors the hovered path through file decorations (the only tree API that

@@ -33,7 +33,7 @@ export class ResultsView implements vscode.Disposable {
      * host can pause editor prefills: a follow link selects the hit, and that selection is
      * not a new query.
      */
-    public onFollowNavigate?: () => void;
+    public onFollowNavigate?: (file: string, line: number) => void;
     /** `${file}:${line}` -> document line of the matching hit, filled by render(). */
     private matchLines = new Map<string, number>();
     /** One entry per result line, for the whole-line Follow link. */
@@ -88,6 +88,9 @@ export class ResultsView implements vscode.Disposable {
     /** Opens a hit next to the results, so following a link never hides them. */
     private async followResult(file: string, line: number): Promise<void> {
         this.lastFollowAt = Date.now();
+        // Before the open: the selection change fires while the editor is being shown, and its
+        // 250ms debounce can beat the awaits below.
+        this.onFollowNavigate?.(file, line);
         try {
             const document = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
             const position = new vscode.Position(Math.max(0, line), 0);
@@ -96,8 +99,6 @@ export class ResultsView implements vscode.Disposable {
                 preserveFocus: false,
                 selection: new vscode.Range(position, position),
             });
-            // The caret just moved by navigation, not because the user picked a new term.
-            this.onFollowNavigate?.();
         } catch {
             /* the file went away since the search */
         }
@@ -248,7 +249,7 @@ export class ResultsView implements vscode.Disposable {
         // host know the selection that follows is navigation, not a query.
         setTimeout(() => {
             void vscode.commands.executeCommand(command).then(
-                () => this.onFollowNavigate?.(),
+                () => this.onFollowNavigate?.(editor.document.uri.fsPath, -1),
                 () => undefined
             );
         }, 0);
@@ -420,6 +421,8 @@ export class ResultsView implements vscode.Disposable {
         this.disposables.length = 0;
     }
 }
+
+
 
 
 
