@@ -56,7 +56,7 @@ When indexing starts on its own: the **first** build always asks, so an ignore f
 * **Max File Size (KB):** Prevent the indexer from choking on huge minified files (default is `512` KB). Binary files are detected and skipped regardless of size.
 * **Max Search Results:** Limit the number of snippets shown to keep the UI responsive (default is `50`).
 * **Show the hit's context line under each result:** on/off (default on, also `fastIndex.showContextLine`). Turn it off for a compact file-and-line list; the list re-renders as soon as you toggle it.
-* **Panel Font Size (px):** Text size for the panel — search results, pinned searches, buttons — default `14`, range `9`–`24`. Everything in the panel scales from it, and the change is visible as you type.
+* **Text size:** the controls follow VS Code's own UI font (`--vscode-font-size`), and the **results** and **Pinned Searches** sections are native tree views, whose row height and font are sized by VS Code — use `window.zoomLevel` (or your theme) when you want everything bigger. There is deliberately no panel-only font setting: it could only have scaled the search controls, which is what it used to do.
 * **Hover jump timing** follows VS Code's own `workbench.hover.delay`; the extension no longer has a delay setting of its own.
 * **Results Context Lines:** Lines shown above and below each match in the results editor (default `2`).
 * **Hover Highlight Color:** which theme color marks the hovered result's line, its file and its folders in the results tree — theme chart **yellow** by default, or the list highlight / chart blue, green, orange, purple, red, or the info foreground. Also `fastIndex.hoverHighlightColor`.
@@ -89,6 +89,12 @@ The index is built from trigrams: every word of three or more characters contrib
 The results tab is a real editor, so its highlighting is the editor's own: no theme parsing or token mapping lives in this extension any more.
 
 ## Changelog
+
+### 0.28.0 → 0.29.0 — the panel font-size setting is gone
+
+* **`fastIndex.panelFontSize` has been removed**, along with the field in the settings form. It promised to size "the panel — search results, pinned searches, buttons", but the results and Pinned Searches sections have been native tree views since 0.21, and VS Code sizes those itself: an extension cannot set a tree's font size (there is no such API; `window.zoomLevel` is workspace-wide). The setting therefore only ever changed the search controls, so it misdescribed what it did.
+* The controls now use VS Code's own UI font (`font-size: var(--vscode-font-size, 13px)`), so they match the rest of the workbench and follow `window.zoomLevel` with everything else.
+* If your `settings.json` still lists `fastIndex.panelFontSize`, delete it: it is simply ignored now (VS Code marks it as an unknown setting).
 
 ### 0.27.0 → 0.28.0 — searching is off while the index is being built
 

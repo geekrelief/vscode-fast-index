@@ -209,14 +209,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private searchGeneration = 0;
     private lastSnapshot: { query: string; isRegex: boolean; isMatchCase: boolean; filter: string; include: string[]; exclude: string[]; rows: any[] } | undefined;
 
-    /** Panel font size in px; every `em` size in the webview scales from it. */
-    private panelFontSize(): number {
-        const configured = vscode.workspace.getConfiguration('fastIndex').get<number>('panelFontSize');
-        return typeof configured === 'number' && Number.isFinite(configured)
-            ? Math.max(9, Math.min(24, Math.round(configured)))
-            : 14;
-    }
-
     public sendConfig(): void {
         const config = vscode.workspace.getConfiguration('fastIndex');
         void this.postToViews({
@@ -231,7 +223,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 maxFileSizeKB: config.get<number>('maxFileSizeKB') || 512,
                 maxResults: config.get<number>('maxResults') || 50,
                 maxRecentSearches: config.get<number>('maxRecentSearches') ?? 20,
-                panelFontSize: this.panelFontSize(),
                 resultContextLines: config.get<number>('resultContextLines') ?? 2,
                 followEditor: config.get<boolean>('followEditor') ?? true,
                 persistPinnedSearches: config.get<boolean>('persistPinnedSearches') !== false,
@@ -891,7 +882,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         maxFileSizeKB: config.get<number>('maxFileSizeKB') ?? 512,
                         maxResults: config.get<number>('maxResults') ?? 50,
                         maxRecentSearches: config.get<number>('maxRecentSearches') ?? 20,
-                        panelFontSize: this.panelFontSize(),
                         resultContextLines: config.get<number>('resultContextLines') ?? 2,
                         followEditor: config.get<boolean>('followEditor') ?? true,
                         persistPinnedSearches: config.get<boolean>('persistPinnedSearches') !== false,
@@ -915,7 +905,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         maxFileSizeKB: clampNumber(input.maxFileSizeKB, current.maxFileSizeKB, 1, 102400),
                         maxResults: clampNumber(input.maxResults, current.maxResults, 1, 100000),
                         maxRecentSearches: clampNumber(input.maxRecentSearches, current.maxRecentSearches, 0, 100),
-                        panelFontSize: clampNumber(input.panelFontSize, current.panelFontSize, 9, 24),
                         resultContextLines: clampNumber(input.resultContextLines, current.resultContextLines, 0, 50),
                         followEditor: typeof input.followEditor === 'boolean' ? input.followEditor : current.followEditor,
                         persistPinnedSearches: typeof input.persistPinnedSearches === 'boolean' ? input.persistPinnedSearches : current.persistPinnedSearches,
@@ -1414,7 +1403,7 @@ ${SidebarProvider.SETTINGS_SCRIPT}
     private static readonly SETTINGS_SCRIPT = `
 const vscode = acquireVsCodeApi();
 const $ = function (id) { return document.getElementById(id); };
-const textFields = ['confIncludeExt', 'confExcludePat', 'confIgnoreFiles', 'confMaxFileSize', 'confMaxResults', 'confMaxRecent', 'confPanelFont', 'confContextLines'];
+const textFields = ['confIncludeExt', 'confExcludePat', 'confIgnoreFiles', 'confMaxFileSize', 'confMaxResults', 'confMaxRecent', 'confContextLines'];
 const changeFields = ['confFollowEditor', 'confPersistPinned', 'confAutoOpenResults', 'confAutoSearchResults', 'confShowContextLine', 'confHoverColor'];
 
 function collect() {
@@ -1425,7 +1414,6 @@ function collect() {
         maxFileSizeKB: parseInt($('confMaxFileSize').value, 10),
         maxResults: parseInt($('confMaxResults').value, 10),
         maxRecentSearches: parseInt($('confMaxRecent').value, 10),
-        panelFontSize: parseInt($('confPanelFont').value, 10),
         resultContextLines: $('confContextLines').value,
         followEditor: $('confFollowEditor').checked,
         persistPinnedSearches: $('confPersistPinned').checked,
@@ -1600,7 +1588,6 @@ function fill(value) {
     $('confMaxFileSize').value = value.maxFileSizeKB || 512;
     $('confMaxResults').value = value.maxResults || 50;
     if (typeof value.maxRecentSearches === 'number') $('confMaxRecent').value = value.maxRecentSearches;
-    $('confPanelFont').value = value.panelFontSize || 14;
     if (value.resultContextLines !== undefined) $('confContextLines').value = value.resultContextLines;
     $('confFollowEditor').checked = value.followEditor !== false;
     $('confPersistPinned').checked = value.persistPinnedSearches !== false;
@@ -1665,10 +1652,6 @@ vscode.postMessage({ type: 'getCaches' });
                 <div class="settings-panel" id="settingsPanel">
                     <section class="settings-group">
                         <h3 class="settings-group-title">Search Settings</h3>
-                        <div class="setting-item">
-                            <label>Panel Font Size (px)</label>
-                            <input type="number" id="confPanelFont" min="9" max="24" step="1" />
-                        </div>
                         <div class="setting-item">
                             <label>Max Search Results</label>
                             <input type="number" id="confMaxResults" />
@@ -1770,7 +1753,9 @@ vscode.postMessage({ type: 'getCaches' });
                     html, body { height: 100%; }
                     /* The pane can be squeezed by the sections below it: scroll the
                        controls instead of clipping the bottom fields (Skip, Replace). */
-                    body { font-family: var(--vscode-font-family); font-size: ${this.panelFontSize()}px; padding: 0; box-sizing: border-box; display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; }
+                    /* The controls follow the workbench font. The results and pinned
+                       searches are native trees, which VS Code sizes itself. */
+                    body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size, 13px); padding: 0; box-sizing: border-box; display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; }
                     /* Settings are tall: let the whole panel scroll so every group is reachable. */
                     body.settings-open { overflow-y: auto; }
                     body.settings-open .content { flex: 0 0 auto; min-height: 0; padding-bottom: 24px; }
@@ -2802,9 +2787,6 @@ vscode.postMessage({ type: 'getCaches' });
                             if (typeof message.value.indexing === 'boolean') {
                                 indexing = message.value.indexing;
                                 applyIndexing();
-                            }
-                            if (typeof message.value.panelFontSize === 'number') {
-                                document.body.style.fontSize = Math.max(9, Math.min(24, message.value.panelFontSize)) + 'px';
                             }
                             const showContext = message.value.showContextLine !== false;
                             if (showContext !== showContextLine) {
