@@ -433,7 +433,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const startedAt = Date.now();
                     const files = this.indexer.search(value, isRegex, { include, exclude });
                     const indexMs = Date.now() - startedAt;
-                    const snippets = await this.getSnippets(files, value, isMatchCase, isRegex, filter, () => generation !== this.searchGeneration);
+                    const snippets = await this.getSnippets(
+                        files, value, isMatchCase, isRegex, filter,
+                        () => generation !== this.searchGeneration,
+                        rows => {
+                            if (generation !== this.searchGeneration) return;
+                            this.postToViews({ type: 'results', value: rows });
+                        });
                     if (generation !== this.searchGeneration) {
                         log(`search "${value}" superseded by a newer search`);
                         return;
@@ -916,7 +922,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private async getSnippets(files: string[], query: string, isMatchCase: boolean, isRegex: boolean, filter?: string, isStale?: () => boolean) {
+    private async getSnippets(files: string[], query: string, isMatchCase: boolean, isRegex: boolean, filter?: string, isStale?: () => boolean, onPartial?: (rows: any[]) => void) {
         const snippets: any[] = [];
         
         let flags = 'g';
@@ -957,6 +963,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         // Our own work vs. wall clock: the difference is time the extension host spent elsewhere.
         let readMs = 0;
         let scanMs = 0;
+        // Progressive results: the first search after a window starts can spend seconds waiting
+        // on a saturated disk, so show what is already found instead of the whole list at once.
+        let lastPostAt = 0;
+        let lastPosted = 0;
 
         const readMatches = async (file: string): Promise<any[]> => {
             const fileResults: any[] = [];
@@ -1059,6 +1069,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     if (take.length === 0) continue;
                     perRoot.set(root, used + take.length);
                     snippets.push(...take);
+                }
+
+                // Show what has been found so far; the tree and results tab still get the
+                // finished list only, because they re-render everything they are given.
+                if (onPartial && snippets.length > lastPosted && Date.now() - lastPostAt >= 150) {
+                    lastPostAt = Date.now();
+                    lastPosted = snippets.length;
+                    onPartial(snippets.slice(0, maxResults));
                 }
             }
             if (overflow.length === 0) break;
@@ -2458,6 +2476,8 @@ vscode.postMessage({ type: 'getCaches' });
         `;
     }
 }
+
+
 
 
 
