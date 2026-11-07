@@ -26,13 +26,15 @@ Instead of searching text "on the fly" for every query, the plugin builds an inv
 * **Advanced Matching:** Toggle Case-Sensitive (`Aa`) matching or Regular Expressions (`.*`) right from the search bar.
 * **Native Sidebar Integration:** A dedicated activity bar icon ⚡️ ensures the search doesn't clutter your built-in tools. Keeps its state even when you switch tabs.
 * **Multithreading:** Heavy file parsing is offloaded to background OS threads. Your VS Code UI won't freeze during indexing.
+* **Ignore files instead of hand-written globs:** **Fast Index: Load Ignore File for Indexing** (also the **Load…** button next to *Ignore Files* in the settings) reads a `.gitignore`-style file — `.gitignore`, `.loreignore`, or any file you pick — and keeps everything it lists out of the index. The syntax is gitignore's own: `#` comments, `!` re-includes, a trailing `/` for directories, a leading `/` (or any inner `/`) to anchor at the workspace folder, and `*` `?` `**` `[...]` wildcards. Rules are re-read on every build **and whenever the file changes**, and they apply to the live file watcher too — so a compiled binary dropped into `Binaries/` never enters the index. Files that are already indexed leave it as soon as a rule covers them.
+* **Binaries are never indexed:** a NUL byte in the first 8 KB marks a file as binary (the same check VS Code uses) and it is skipped, along with anything an old index kept for it. Compiled `.dll`/`.so`/`.lib` blobs can no longer match a query through their symbol tables or fill the results with gibberish lines.
 * **Disk Caching & Live Updates:** The index is saved locally and instantly loads upon restart. Live file watchers keep the index accurate as you code.
 
 ## How to Use
 
 1. Open your project in VS Code.
 2. Click on the **Lightning Bolt (⚡️)** icon in the Activity Bar on the left.
-3. If it's your first time, the plugin will ask to build the index. You can also click the **⚙️** title-bar button and press **Reindex** (settings save themselves as you edit).
+3. If it's your first time, the plugin will ask to build the index — **Build Index**, **Load Ignore File First** or **Later**. Pick the middle one to add a `.gitignore` before anything is scanned. You can also click the **⚙️** title-bar button and press **Reindex** (settings save themselves as you edit).
 4. Start typing (at least 3 characters) — results with code highlighting will appear instantly. Click on a result to jump directly to the matched line.
 5. Click **▼ Replace** to open the replace panel. Hover over a result and click `Replace` for a surgical fix, or use `Replace All`.
 6. Use the `Aa` or `.*` toggles in the search input to use case-sensitive or RegEx searches.
@@ -42,11 +44,14 @@ Instead of searching text "on the fly" for every query, the plugin builds an inv
 
 You can customize the extension directly via the **⚙️** title-bar button. The panel is split into three bordered groups — **Search Settings**, **Indexing** and **Cached indexes** — so it is obvious which controls change the index and which only change how searching behaves. Every field is applied as you edit it — there is no Save button: text and number fields save after a short pause (or immediately on `Enter`), checkboxes save the moment you toggle them.
 
-Three of these settings shape the index itself: **Include Extensions**, **Exclude Patterns** and **Max File Size**. Editing them cannot change the index that already exists, so the panel shows a **stale-index banner** naming the changed fields, with an **Undo changes** button that restores the values the current index was built with. **Reindex** commits them. If you leave the settings view or close the panel with such a change still pending, a confirmation asks whether to **Reindex now**, **Reject changes** or **Keep for now** (asking only once per distinct set of values).
+Four of these settings shape the index itself: **Include Extensions**, **Exclude Patterns**, **Ignore Files** and **Max File Size**. Editing them cannot change the index that already exists, so the panel shows a **stale-index banner** naming the changed fields, with an **Undo changes** button that restores the values the current index was built with. **Reindex** commits them. If you leave the settings view or close the panel with such a change still pending, a confirmation asks whether to **Reindex now**, **Reject changes** or **Keep for now** (asking only once per distinct set of values).
+
+When indexing starts on its own: the **first** build always asks, so an ignore file can be loaded before anything is scanned. After that, activation rebuilds a folder whose cache is missing or corrupt — by then the ignore files are already configured — and the file watcher indexes individual created or changed files as you work.
 
 * **Include Extensions:** Limit indexing to specific file types (e.g., `ts,js,md`). Leave empty to index everything.
 * **Exclude Patterns:** Glob patterns for files/folders to ignore (e.g., `{**/node_modules/**,**/.git/**}`).
-* **Max File Size (KB):** Prevent the indexer from choking on huge minified or binary files (default is `512` KB).
+* **Ignore Files:** `.gitignore`-style files whose rules are excluded from indexing (also `fastIndex.ignoreFiles`, e.g. `.gitignore, .loreignore`). The **Load…** button picks one and appends it; relative entries resolve against every workspace folder, so in a multi-root workspace `.gitignore` means each folder's own file. The line under the field shows what each file contributed (`12 rules`), or **not found**. Rules are combined with *Exclude Patterns*: the converted globs let the file walk skip ignored folders outright, while the full rule set is checked against every path — which is how `!` re-includes still work.
+* **Max File Size (KB):** Prevent the indexer from choking on huge minified files (default is `512` KB). Binary files are detected and skipped regardless of size.
 * **Max Search Results:** Limit the number of snippets shown to keep the UI responsive (default is `50`).
 * **Show the hit's context line under each result:** on/off (default on, also `fastIndex.showContextLine`). Turn it off for a compact file-and-line list; the list re-renders as soon as you toggle it.
 * **Panel Font Size (px):** Text size for the panel — search results, pinned searches, buttons — default `14`, range `9`–`24`. Everything in the panel scales from it, and the change is visible as you type.
@@ -64,7 +69,7 @@ Three of these settings shape the index itself: **Include Extensions**, **Exclud
 One cache segment per workspace folder, shared by every workspace that contains that folder:
 
 ```
-%APPDATA%\Code\User\globalStorage\eric.vscode-fast-index\fast-index\root-<folder-hash>.v4.bin
+%APPDATA%\Code\User\globalStorage\eric.vscode-fast-index\fast-index\root-<folder-hash>.v5.bin
 ```
 
 Each segment is a gzip-compressed binary file — roughly 34 MB for the Unreal Engine source tree — plus a small `<segment>.journal` holding edits made while VS Code was running.
@@ -82,6 +87,18 @@ The index is built from trigrams: every word of three or more characters contrib
 The results tab is a real editor, so its highlighting is the editor's own: no theme parsing or token mapping lives in this extension any more.
 
 ## Changelog
+
+### 0.22.3 → 0.23.0 — ignore files, binary detection and the results-line fix
+
+#### Ignore files
+* New command **Fast Index: Load Ignore File for Indexing** (palette) and a **Load…** button in the settings' *Ignore Files* row. Both list the `.gitignore` / `.loreignore` files that exist in the workspace, or let you pick any file, and record the choice in the new `fastIndex.ignoreFiles` setting.
+* The files are parsed as real gitignore lists — `#` comments, `!` re-includes with last-match-wins precedence, `dir/` directory rules, `/anchored` rules, `**`, `*`, `?` and `[...]` classes — instead of copying patterns into *Exclude Patterns*, so editing the ignore file keeps the index in sync.
+* Rules are applied in three places: the folder walk (`findFiles` gets converted globs, so ignored folders are never opened), the build's path list (the full rule set, so negations work), and the file watcher (`shouldIndex`), which previously ignored *Exclude Patterns* completely. An edited ignore file is reloaded immediately, and files a rule now covers are dropped from the index and journaled out of the cache.
+* The **first** index build asks before starting and now offers **Load Ignore File First**, so a large tree can be excluded before it is ever indexed. Later activations rebuild missing caches as before.
+
+#### Binary files
+* The worker skips any file with a NUL in its first 8 KB (VS Code's own binary heuristic) and reports it, so an old index's entry for it is removed. The search read path checks too, which also protects caches built before this release.
+* Result text is sanitized: control characters, stray carriage returns and embedded newlines become spaces. This is what made hover-jump jump to the wrong place — a lone `\r` inside a line split it in two in the editor's text model, so every later `file:line` index was off by one; hovering a row could land anywhere. `reveal()` now also verifies that the line it is about to scroll to really shows that hit's number, and does nothing instead of jumping elsewhere.
 
 ### 0.8.0 → 0.21.3 — native results tree, hover jump, pinned section, settings section, results editor and settings fixes
 

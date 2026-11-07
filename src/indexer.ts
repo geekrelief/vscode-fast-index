@@ -7,6 +7,15 @@ import * as crypto from 'crypto';
 import { computeTrigrams, queryTrigrams } from './trigrams';
 import { log } from './log';
 import { BATCH_WINDOW } from './protocol';
+import {
+    IgnoreFileStats,
+    IgnoreRule,
+    IgnoreRules,
+    mergeExcludeGlobs,
+    parseIgnoreRules,
+    resolveIgnoreFile,
+    splitIgnoreFiles
+} from './ignore';
 
 export interface CacheLoadResult {
     status: 'loaded' | 'partial' | 'missing';
@@ -355,6 +364,8 @@ export class ProjectIndexer {
     private worker: Worker;
     /** Results applied since the worker was last acknowledged. */
     private ackWindow = 0;
+    /** Files a previous build indexed that turned out to be binary, since the last save. */
+    private binaryRemovals = 0;
 
     constructor(workspaceStorage: vscode.Uri | undefined, globalStorage: vscode.Uri | undefined) {
         const storage = globalStorage ?? workspaceStorage;
@@ -377,6 +388,18 @@ export class ProjectIndexer {
 
         this.worker = new Worker(path.join(__dirname, 'worker.js'));
         this.worker.on('message', (msg) => {
+            if (msg.type === 'binaryFile') {
+                // The worker will not index a binary: drop whatever an older build kept.
+                if (this.fileIdOf.has(msg.filePath)) {
+                    const rootIndex = this.rootIndexFor(msg.filePath);
+                    this.removeFileFromIndex(msg.filePath);
+                    this.binaryRemovals++;
+                    if (rootIndex >= 0 && !this.isIndexing) {
+                        this.queueJournal(rootIndex, JSON.stringify({ p: msg.filePath, d: 1 }) + '\n');
+                    }
+                }
+                return;
+            }
             if (msg.type === 'fileDone' || msg.type === 'singleDone') {
                 const mtime = typeof msg.mtime === 'number' ? msg.mtime : 0;
                 const size = typeof msg.size === 'number' ? msg.size : 0;
@@ -895,6 +918,123 @@ export class ProjectIndexer {
         }
     }
 
+    // ---- ignore files -------------------------------------------------------------
+
+    /** Rules read from `fastIndex.ignoreFiles`; empty until refreshed. */
+    private ignoreRules = new IgnoreRules();
+    private ignoreFileStats: IgnoreFileStats[] = [];
+
+    public get ignoreRuleCount(): number {
+        return this.ignoreRules.size;
+    }
+
+    /** What each configured ignore file contributed, for the settings panel. */
+    public get ignoreFiles(): IgnoreFileStats[] {
+        return this.ignoreFileStats;
+    }
+
+    /** The folder-relative path of a file, or undefined when it is outside the index. */
+    private relativeToRoot(filePath: string): string | undefined {
+        const rootIndex = this.rootIndexFor(filePath);
+        if (rootIndex < 0) return undefined;
+        const root = this.roots[rootIndex].path.replace(/\\/g, '/').replace(/\/+$/, '');
+        const file = filePath.replace(/\\/g, '/');
+        if (file.length <= root.length + 1) return undefined;
+        return file.slice(root.length + 1);
+    }
+
+    /**
+     * Re-reads the configured ignore files. Relative entries are resolved against
+     * every workspace folder; absolute entries are read once. A missing file is
+     * reported instead of thrown, so a workspace without a `.gitignore` is fine.
+     */
+    public async refreshIgnoreRules(): Promise<IgnoreRules> {
+        const configured = splitIgnoreFiles(vscode.workspace.getConfiguration('fastIndex').get<string>('ignoreFiles'));
+        const rules: IgnoreRule[] = [];
+        const stats: IgnoreFileStats[] = [];
+
+        for (const entry of configured) {
+            const candidates = path.isAbsolute(entry)
+                ? [entry]
+                : this.roots.map(root => resolveIgnoreFile(root.path, entry));
+            let found = false;
+            for (const file of candidates) {
+                let text: string;
+                try {
+                    text = await fs.promises.readFile(file, 'utf8');
+                } catch (err: any) {
+                    if (err?.code !== 'ENOENT') {
+                        stats.push({ file, exists: false, rules: 0, negations: 0, error: err?.message ?? String(err) });
+                    }
+                    continue;
+                }
+                found = true;
+                const parsed = parseIgnoreRules(text);
+                rules.push(...parsed);
+                stats.push({
+                    file,
+                    exists: true,
+                    rules: parsed.length,
+                    negations: parsed.filter(rule => rule.negated).length
+                });
+            }
+            if (!found) {
+                // Still record the resolved paths, so creating the file later is noticed.
+                const missing = path.isAbsolute(entry) ? [entry] : this.roots.map(root => resolveIgnoreFile(root.path, entry));
+                for (const file of missing) stats.push({ file, exists: false, rules: 0, negations: 0 });
+            }
+        }
+
+        this.ignoreRules = new IgnoreRules(rules);
+        this.ignoreFileStats = stats;
+        if (configured.length > 0) {
+            const read = stats.filter(stat => stat.exists).length;
+            log(`ignore files: ${read}/${configured.length} read, ${rules.length} rules`);
+        }
+        return this.ignoreRules;
+    }
+
+    /** Glob equivalents, so findFiles prunes ignored folders before walking them. */
+    public ignoreGlobs(): string[] {
+        return this.ignoreRules.toGlobs();
+    }
+
+    /** True when an ignore file covers this path (the watcher path uses it). */
+    public isIgnored(filePath: string): boolean {
+        if (this.ignoreRules.isEmpty) return false;
+        const relative = this.relativeToRoot(filePath);
+        return relative !== undefined && this.ignoreRules.matches(relative);
+    }
+
+    /** True when this path is one of the configured ignore files (editing it changes the rules). */
+    public isIgnoreFile(filePath: string): boolean {
+        const normalized = normalizePath(filePath);
+        return this.ignoreFileStats.some(stat => normalizePath(stat.file) === normalized);
+    }
+
+    /**
+     * Drops files that are already indexed but are now ignored. The removal is
+     * journaled, so reloading the segment does not bring them back.
+     */
+    public removeIgnoredFiles(): number {
+        if (this.ignoreRules.isEmpty) return 0;
+        let removed = 0;
+        for (let fileId = 0; fileId < this.files.length; fileId++) {
+            const file = this.files[fileId];
+            if (!file) continue;
+            const relative = this.relativeToRoot(file);
+            if (relative === undefined || !this.ignoreRules.matches(relative)) continue;
+            const rootIndex = this.rootIndexFor(file);
+            this.blankFile(fileId);
+            removed++;
+            if (rootIndex >= 0 && !this.isIndexing) {
+                this.queueJournal(rootIndex, JSON.stringify({ p: file, d: 1 }) + '\n');
+            }
+        }
+        if (removed > 0) log(`ignore files: dropped ${removed} already-indexed files`);
+        return removed;
+    }
+
     // ---- building ----------------------------------------------------------------
 
     public async buildIndex(onlyRoots?: string[], force = false): Promise<boolean> {
@@ -904,9 +1044,14 @@ export class ProjectIndexer {
 
         try {
             const config = vscode.workspace.getConfiguration('fastIndex');
-            const excludePattern = config.get<string>('excludePatterns') || '{**/node_modules/**,**/.git/**,**/.*/**}';
+            const configuredExclude = config.get<string>('excludePatterns') || '{**/node_modules/**,**/.git/**,**/.*/**}';
             const maxFileSizeKB = config.get<number>('maxFileSizeKB') || 512;
             const includeExtensionsRaw = config.get<string>('includeExtensions') || '';
+
+            // Read the ignore files first: their globs prune the walk, and their
+            // rules filter what the walk still returns.
+            await this.refreshIgnoreRules();
+            const excludePattern = mergeExcludeGlobs(configuredExclude, this.ignoreGlobs());
 
             let includePattern = '**/*';
             if (includeExtensionsRaw.trim()) {
@@ -936,7 +1081,9 @@ export class ProjectIndexer {
                 const folder = vscode.workspace.workspaceFolders?.find(f => samePath(f.uri.fsPath, this.roots[rootIndex].path));
                 const base = folder ?? vscode.Uri.file(this.roots[rootIndex].path);
                 const found = await vscode.workspace.findFiles(new vscode.RelativePattern(base, includePattern), excludePattern);
-                const paths = found.map(f => f.fsPath);
+                // The globs above are only a hint: the rules decide, so patterns a glob
+                // cannot express (negations, character classes) still apply.
+                const paths = found.map(f => f.fsPath).filter(p => !this.isIgnored(p));
                 const mtimes = new Float64Array(paths.length);
                 const sizes = new Uint32Array(paths.length);
                 for (let i = 0; i < paths.length; i++) {
@@ -999,12 +1146,13 @@ export class ProjectIndexer {
                         }
                     }
 
-                    const needsSave = force || changed > 0 || removed > 0 || this.overlay.size > 0;
+                    const needsSave = force || changed > 0 || removed > 0 || this.binaryRemovals > 0 || this.overlay.size > 0;
                     let savedBytes = 0;
                     if (needsSave) {
                         this.onProgress?.(`Saving ${selected.length} folder${selected.length === 1 ? '' : 's'}…`);
                         progress.report({ message: 'Saving index…' });
                         savedBytes = await this.saveToDisk(selected);
+                        this.binaryRemovals = 0;
                         // Reload so the in-memory index matches the file exactly.
                         await this.reloadAll();
                     }
@@ -1047,6 +1195,9 @@ export class ProjectIndexer {
             const onMessage = (msg: any) => {
                 if (msg.type === 'fileDone') {
                     changed++;
+                    onDone(1);
+                } else if (msg.type === 'binaryFile') {
+                    // Skipped, but processed: keep the progress bar honest.
                     onDone(1);
                 } else if (msg.type === 'batchDone') {
                     skipped = typeof msg.skipped === 'number' ? msg.skipped : 0;
@@ -1094,6 +1245,9 @@ export class ProjectIndexer {
             if (segments[i].startsWith('.')) return false;
         }
         if (ARTIFACT_SEGMENTS.some(segment => normalized.includes(segment))) return false;
+        // Ignore files win over everything else: a file listed there never enters the
+        // index, whether it was found by a build or created while the window was open.
+        if (this.isIgnored(filePath)) return false;
 
         const config = vscode.workspace.getConfiguration('fastIndex');
         const includeRaw = config.get<string>('includeExtensions') || '';

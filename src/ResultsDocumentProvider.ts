@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { toSingleLine } from './binary';
 
 /** A search hit, as the panel already builds it. */
 export interface ResultRow {
@@ -134,7 +135,7 @@ export async function buildResultsText(
             // The file went away between the search and the render: keep the hit itself.
             matchLines.set(row.file + ':' + row.line, body.length);
             hits.push({ documentLine: body.length, file: row.file, sourceLine: row.line });
-            body.push('  ' + pad(row.line + 1, 4) + ': ' + String(row.text ?? ''));
+            body.push('  ' + pad(row.line + 1, 4) + ': ' + toSingleLine(String(row.text ?? '')));
             continue;
         }
 
@@ -148,7 +149,7 @@ export async function buildResultsText(
                 matchLines.set(row.file + ':' + index, body.length);
                 hits.push({ documentLine: body.length, file: row.file, sourceLine: index });
             }
-            body.push('  ' + pad(index + 1, width) + separator + source[index]);
+            body.push('  ' + pad(index + 1, width) + separator + toSingleLine(source[index]));
         }
     }
 

@@ -48,6 +48,9 @@ export async function activate(context: vscode.ExtensionContext) {
     setLogChannel(searchLog);
     context.subscriptions.push(searchLog);
     log('Fast Index activated');
+    // Load the ignore rules before anything can be indexed, so the watcher, the cached
+    // segments and the first build all agree on what belongs in the index.
+    await indexer.refreshIgnoreRules();
 
     const sidebarProvider = new SidebarProvider(context.extensionUri, indexer, rememberSkipped, context.workspaceState);
 
@@ -180,6 +183,8 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('vscode-fast-index.showLog', () => searchLog.show(true)),
         vscode.commands.registerCommand('vscode-fast-index.unlockResults', () => sidebarProvider.setLock(false)),
         vscode.commands.registerCommand('vscode-fast-index.toggleSettings', () => sidebarProvider.showSettings()),
+        // Palette entry for loading a `.gitignore`-style file into fastIndex.ignoreFiles.
+        vscode.commands.registerCommand('vscode-fast-index.importIgnoreFile', () => sidebarProvider.importIgnoreFile()),
         vscode.commands.registerCommand('vscode-fast-index.showMenu', async () => {
             const items: (vscode.QuickPickItem & { id: string })[] = [
                 { id: 'pinned', label: '$(pin) Show or hide pinned searches' },
@@ -216,8 +221,19 @@ export async function activate(context: vscode.ExtensionContext) {
     });
 
     const watcher = vscode.workspace.createFileSystemWatcher('**/*');
+    // Editing an ignore file changes what may be indexed, so reload the rules and
+    // drop whatever they now exclude.
+    const reloadIgnoreFiles = async (filePath: string): Promise<void> => {
+        if (!indexer.isIgnoreFile(filePath)) return;
+        await indexer.refreshIgnoreRules();
+        indexer.removeIgnoredFiles();
+        sidebarProvider.sendConfig();
+    };
     watcher.onDidCreate(uri => indexer.updateFile(uri.fsPath));
-    watcher.onDidChange(uri => indexer.updateFile(uri.fsPath));
+    watcher.onDidChange(uri => {
+        indexer.updateFile(uri.fsPath);
+        void reloadIgnoreFiles(uri.fsPath);
+    });
     watcher.onDidDelete(uri => indexer.deleteFile(uri.fsPath));
 
     context.subscriptions.push(indexCommand, reindexCommand, watcher, { dispose: () => indexer.dispose() });
@@ -228,6 +244,12 @@ export async function activate(context: vscode.ExtensionContext) {
     sidebarProvider.setStatus('Loading index…', 'busy');
 
     const cache = await indexer.loadFromDisk();
+    // A cached segment can still list files an ignore file now covers: drop them, and
+    // journal the removal so the next load starts clean.
+    const droppedByIgnore = indexer.removeIgnoredFiles();
+    if (droppedByIgnore > 0) {
+        log(`ignore files: ${droppedByIgnore} cached files are ignored`);
+    }
     const pendingRoots = [...cache.missingRoots, ...cache.corruptRoots]
         .filter(root => !skipped.has(normalize(root)));
 
@@ -259,12 +281,23 @@ export async function activate(context: vscode.ExtensionContext) {
     }
 
     const names = pendingRoots.map(p => vscode.workspace.asRelativePath(p, false)).join(', ');
+    // Before the first build the user can shape what gets indexed: a `.gitignore`
+    // keeps build output and compiled binaries out of the index from the start.
     const choice = await vscode.window.showInformationMessage(
         `Fast Index: this workspace has not been indexed yet (${names}). Build the index now?`,
-        'Build Index', 'Later'
+        'Build Index', 'Load Ignore File First', 'Later'
     );
     if (choice === 'Build Index') {
         await runBuild(pendingRoots);
+        return;
+    }
+    if (choice === 'Load Ignore File First') {
+        await sidebarProvider.importIgnoreFile(false);
+        const afterImport = await vscode.window.showInformationMessage(
+            'Fast Index: ignore file loaded. Build the index now?',
+            'Build Index', 'Later'
+        );
+        if (afterImport === 'Build Index') await runBuild(pendingRoots);
     }
 }
 

@@ -352,6 +352,13 @@ export class ResultsView implements vscode.Disposable {
         if (target < 0 || target >= editor.document.lineCount) return;
 
         const range = editor.document.lineAt(target).range;
+        // Guard against a stale map: a line that does not show this hit's number would
+        // scroll to the wrong place, which is worse than staying put.
+        const parsed = RESULT_LINE.exec(editor.document.lineAt(target).text);
+        if (!parsed || Number(parsed[2]) !== line + 1) {
+            log(`results: no line for ${file}:${line + 1} at ${target} (map out of date)`);
+            return;
+        }
         editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
         editor.selection = new vscode.Selection(range.start, range.end);
     }

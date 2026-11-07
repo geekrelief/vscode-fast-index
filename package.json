@@ -3,7 +3,7 @@
   "displayName": "Fast Project Indexer ",
   "description": "Lightning-fast text search for VS Code using a background inverted trigram index.",
   "publisher": "eric",
-  "version": "0.22.3",
+  "version": "0.23.0",
   "engines": {
     "vscode": "^1.108.0"
   },
@@ -29,9 +29,6 @@
   ],
   "license": "MIT",
   "contributes": {
-
-
-
     "viewsContainers": {
       "activitybar": [
         {
@@ -127,6 +124,11 @@
         "command": "vscode-fast-index.toggleReplace",
         "title": "Replace",
         "icon": "$(replace)"
+      },
+      {
+        "command": "vscode-fast-index.importIgnoreFile",
+        "title": "Fast Index: Load Ignore File for Indexing",
+        "icon": "$(file)"
       }
     ],
     "menus": {
@@ -203,6 +205,11 @@
           "type": "string",
           "default": "{**/node_modules/**,**/.git/**,**/.*/**,**/dist/**,**/out/**,**/Binaries/**,**/Intermediate/**,**/DerivedDataCache/**,**/Saved/**,**/Content/**,**/*.png,**/*.jpg,**/*.jpeg,**/*.svg,**/*.uasset,**/*.umap}",
           "description": "File and folder patterns to ignore during indexing (Glob format). Hidden folders (names starting with '.') are excluded by default."
+        },
+        "fastIndex.ignoreFiles": {
+          "type": "string",
+          "default": "",
+          "description": "Comma-separated .gitignore-style files whose rules are excluded from indexing (e.g., .gitignore, .loreignore). Relative paths resolve against every workspace folder; absolute paths are read once. Rules are re-read on every build and when the file changes, and apply to the file watcher as well as to builds. Run \"Fast Index: Load Ignore File for Indexing\" to add one."
         },
         "fastIndex.maxFileSizeKB": {
           "type": "number",
@@ -328,10 +335,3 @@
     "typescript": "^5.9.3"
   }
 }
-
-
-
-
-
-
-

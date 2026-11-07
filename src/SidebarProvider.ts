@@ -3,6 +3,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ProjectIndexer, isFileNameMatch, fileNameRank, SearchScope } from './indexer';
 import { DEFAULT_HIGHLIGHT_COLOR, HIGHLIGHT_COLORS } from './resultsTree';
+import { isBinaryContent, toSingleLine } from './binary';
+import { parseIgnoreRules } from './ignore';
 import { log } from './log';
 
 export interface PinnedSearch {
@@ -110,6 +112,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             value: {
                 includeExtensions: config.get<string>('includeExtensions') || '',
                 excludePatterns: config.get<string>('excludePatterns') || '',
+                ignoreFiles: config.get<string>('ignoreFiles') || '',
+                ignoreStats: this.indexer.ignoreFiles,
+                ignoreRuleCount: this.indexer.ignoreRuleCount,
                 maxFileSizeKB: config.get<number>('maxFileSizeKB') || 512,
                 maxResults: config.get<number>('maxResults') || 50,
                 maxRecentSearches: config.get<number>('maxRecentSearches') ?? 20,
@@ -128,17 +133,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     /** The settings a build actually consumed, so "stale" can be measured rather than guessed. */
-    private currentIndexConfig(): { includeExtensions: string; excludePatterns: string; maxFileSizeKB: number } {
+    private currentIndexConfig(): { includeExtensions: string; excludePatterns: string; ignoreFiles: string; maxFileSizeKB: number } {
         const config = vscode.workspace.getConfiguration('fastIndex');
         return {
             includeExtensions: config.get<string>('includeExtensions') ?? '',
             excludePatterns: config.get<string>('excludePatterns') ?? '',
+            ignoreFiles: config.get<string>('ignoreFiles') ?? '',
             maxFileSizeKB: config.get<number>('maxFileSizeKB') ?? 512
         };
     }
 
-    private indexedConfig(): { includeExtensions: string; excludePatterns: string; maxFileSizeKB: number } | undefined {
-        return this.memento?.get<{ includeExtensions: string; excludePatterns: string; maxFileSizeKB: number }>(INDEXED_CONFIG_KEY);
+    private indexedConfig(): { includeExtensions: string; excludePatterns: string; ignoreFiles: string; maxFileSizeKB: number } | undefined {
+        return this.memento?.get<{ includeExtensions: string; excludePatterns: string; ignoreFiles: string; maxFileSizeKB: number }>(INDEXED_CONFIG_KEY);
     }
 
     /** Human names of the index-affecting settings that no build has picked up yet. */
@@ -149,6 +155,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         const fields: string[] = [];
         if (indexed.includeExtensions !== current.includeExtensions) fields.push('Include Extensions');
         if (indexed.excludePatterns !== current.excludePatterns) fields.push('Exclude Patterns');
+        if ((indexed.ignoreFiles ?? '') !== current.ignoreFiles) fields.push('Ignore Files');
         if (indexed.maxFileSizeKB !== current.maxFileSizeKB) fields.push('Max File Size');
         return fields;
     }
@@ -171,6 +178,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         try {
             await config.update('includeExtensions', indexed.includeExtensions, target);
             await config.update('excludePatterns', indexed.excludePatterns, target);
+            await config.update('ignoreFiles', indexed.ignoreFiles ?? '', target);
             await config.update('maxFileSizeKB', indexed.maxFileSizeKB, target);
         } catch (error: any) {
             vscode.window.showErrorMessage(`Fast Index: could not restore settings (${error?.message ?? error})`);
@@ -203,6 +211,117 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             void vscode.commands.executeCommand('vscode-fast-index.buildIndex');
         } else if (choice === 'Reject changes') {
             await this.undoIndexSettings();
+        }
+    }
+
+    /**
+     * Loads a `.gitignore`-style file into `fastIndex.ignoreFiles`, so its rules
+     * shape the index from now on. Offered before the first build as well, so a
+     * large tree (compiled binaries, engine dumps) can be excluded up front.
+     */
+    public async importIgnoreFile(offerReindex = true): Promise<void> {
+        const folders = (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath);
+        if (folders.length === 0) {
+            vscode.window.showWarningMessage('Fast Index: open a folder before loading an ignore file.');
+            return;
+        }
+
+        const found = new Set<string>();
+        for (const folder of folders) {
+            for (const name of ['.gitignore', '.loreignore']) {
+                const file = path.join(folder, name);
+                if (fs.existsSync(file)) found.add(file);
+            }
+        }
+
+        const items: (vscode.QuickPickItem & { file?: string })[] = [];
+        for (const file of found) {
+            items.push({
+                label: '$(file) ' + path.basename(file),
+                description: vscode.workspace.asRelativePath(file, false),
+                file
+            });
+        }
+        items.push({ label: '$(folder-opened) Choose another file…', description: 'Any .gitignore-style list' });
+
+        const picked = await vscode.window.showQuickPick(items, {
+            title: 'Fast Index: load an ignore file',
+            placeHolder: 'Patterns in this file will be excluded from the index'
+        });
+        if (!picked) return;
+
+        let file = picked.file;
+        if (!file) {
+            const chosen = await vscode.window.showOpenDialog({
+                canSelectMany: false,
+                openLabel: 'Use as ignore file',
+                defaultUri: vscode.Uri.file(folders[0])
+            });
+            if (!chosen || chosen.length === 0) return;
+            file = chosen[0].fsPath;
+        }
+
+        let text: string;
+        try {
+            text = await fs.promises.readFile(file, 'utf8');
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Fast Index: could not read ${file} (${error?.message ?? error})`);
+            return;
+        }
+
+        // Stored relative to its workspace folder when possible, so the setting stays
+        // portable; in a multi-root workspace each folder's same-named file is read.
+        const normalizedFile = file.replace(/\\/g, '/').toLowerCase();
+        const folder = folders
+            .filter(candidate => {
+                const prefix = candidate.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() + '/';
+                return normalizedFile.startsWith(prefix);
+            })
+            .sort((a, b) => b.length - a.length)[0];
+        const entry = folder ? path.relative(folder, file).split(path.sep).join('/') : file;
+
+        const rules = parseIgnoreRules(text);
+        const config = vscode.workspace.getConfiguration('fastIndex');
+        const configured = String(config.get<string>('ignoreFiles') ?? '')
+            .split(',')
+            .map(value => value.trim())
+            .filter(Boolean);
+        if (configured.includes(entry)) {
+            vscode.window.showInformationMessage(`Fast Index: ${entry} is already loaded.`);
+            return;
+        }
+
+        try {
+            await config.update('ignoreFiles', [...configured, entry].join(', '), vscode.ConfigurationTarget.Workspace);
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Fast Index: could not save the ignore file setting (${error?.message ?? error})`);
+            return;
+        }
+
+        await this.indexer.refreshIgnoreRules();
+        const removed = this.indexer.removeIgnoredFiles();
+        this.sendConfig();
+
+        const negations = rules.filter(rule => rule.negated).length;
+        const details = [
+            `${rules.length} rule${rules.length === 1 ? '' : 's'}`,
+            negations ? `${negations} re-include${negations === 1 ? '' : 's'}` : '',
+            removed ? `${removed.toLocaleString()} indexed file${removed === 1 ? '' : 's'} dropped` : ''
+        ].filter(Boolean).join(' · ');
+
+        log(`ignore files: loaded ${entry} (${details})`);
+        if (!offerReindex) {
+            vscode.window.showInformationMessage(`Fast Index: ${entry} loaded — ${details}.`);
+            return;
+        }
+        const choice = await vscode.window.showInformationMessage(
+            `Fast Index: ${entry} loaded — ${details}. Reindex to apply it to the whole folder?`,
+            'Reindex',
+            'Later'
+        );
+        if (choice === 'Reindex') {
+            this.promptedIndexSignature = '';
+            void vscode.commands.executeCommand('vscode-fast-index.buildIndex');
         }
     }
 
@@ -592,6 +711,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     await this.undoIndexSettings();
                     break;
                 }
+                case 'importIgnoreFile': {
+                    await this.importIgnoreFile();
+                    break;
+                }
                 case 'settingsClosed': {
                     void this.promptPendingIndex();
                     break;
@@ -620,6 +743,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const current = {
                         includeExtensions: config.get<string>('includeExtensions') ?? '',
                         excludePatterns: config.get<string>('excludePatterns') ?? '',
+                        ignoreFiles: config.get<string>('ignoreFiles') ?? '',
                         maxFileSizeKB: config.get<number>('maxFileSizeKB') ?? 512,
                         maxResults: config.get<number>('maxResults') ?? 50,
                         maxRecentSearches: config.get<number>('maxRecentSearches') ?? 20,
@@ -643,6 +767,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const next = {
                         includeExtensions: typeof input.includeExtensions === 'string' ? input.includeExtensions : current.includeExtensions,
                         excludePatterns: typeof input.excludePatterns === 'string' ? input.excludePatterns : current.excludePatterns,
+                        ignoreFiles: typeof input.ignoreFiles === 'string' ? input.ignoreFiles : current.ignoreFiles,
                         maxFileSizeKB: clampNumber(input.maxFileSizeKB, current.maxFileSizeKB, 1, 102400),
                         maxResults: clampNumber(input.maxResults, current.maxResults, 1, 100000),
                         maxRecentSearches: clampNumber(input.maxRecentSearches, current.maxRecentSearches, 0, 100),
@@ -672,13 +797,25 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     if (failures.length > 0) {
                         vscode.window.showErrorMessage(`Fast Index: could not save ${failures.join(', ')}`);
                     }
+                    // A new ignore list applies to the watcher and the next search at once;
+                    // files it covers leave the index without waiting for a rebuild.
+                    if (next.ignoreFiles !== current.ignoreFiles) {
+                        await this.indexer.refreshIgnoreRules();
+                        this.indexer.removeIgnoredFiles();
+                    }
                     // Settings are saved as the user edits; index-affecting keys only flag
                     // that the index is stale, they never rebuild behind the user's back.
                     // Reflect what is actually stored, and re-run the current search so a new
                     // result limit takes effect immediately.
                     this.postToViews({
                         type: 'configData',
-                        value: { ...next, saved: true, pendingFields: this.pendingIndexFields() }
+                        value: {
+                            ...next,
+                            saved: true,
+                            ignoreStats: this.indexer.ignoreFiles,
+                            ignoreRuleCount: this.indexer.ignoreRuleCount,
+                            pendingFields: this.pendingIndexFields()
+                        }
                     });
                     break;
                 }
@@ -986,6 +1123,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 const readStarted = Date.now();
                 const content = openDocument ? openDocument.getText() : await fs.promises.readFile(file, 'utf-8');
                 readMs += Date.now() - readStarted;
+                // A binary that slipped into the index (an older cache, a stray blob) has
+                // no meaningful lines: reading it would only produce gibberish rows.
+                if (isBinaryContent(content)) return [];
                 readOk = true;
                 filesRead++;
                 bytesRead += content.length;
@@ -1009,8 +1149,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     }
                     return lo;
                 };
-                const lineText = (line: number): string =>
-                    content.slice(lineStarts[line], line + 1 < lineStarts.length ? lineStarts[line + 1] : content.length).trim();
+                const lineText = (line: number): string => toSingleLine(
+                    content.slice(lineStarts[line], line + 1 < lineStarts.length ? lineStarts[line + 1] : content.length).trim(),
+                    400
+                );
 
                 while (fileResults.length < perFileLimit && (match = searchRegex.exec(content)) !== null) {
                     if (match[0].length === 0) {
@@ -1119,13 +1261,14 @@ ${SidebarProvider.SETTINGS_SCRIPT}
     private static readonly SETTINGS_SCRIPT = `
 const vscode = acquireVsCodeApi();
 const $ = function (id) { return document.getElementById(id); };
-const textFields = ['confIncludeExt', 'confExcludePat', 'confMaxFileSize', 'confMaxResults', 'confMaxRecent', 'confPanelFont', 'confContextLines'];
+const textFields = ['confIncludeExt', 'confExcludePat', 'confIgnoreFiles', 'confMaxFileSize', 'confMaxResults', 'confMaxRecent', 'confPanelFont', 'confContextLines'];
 const changeFields = ['confFollowEditor', 'confPersistPinned', 'confAutoOpenResults', 'confAutoSearchResults', 'confShowContextLine', 'confHoverColor'];
 
 function collect() {
     return {
         includeExtensions: $('confIncludeExt').value,
         excludePatterns: $('confExcludePat').value,
+        ignoreFiles: $('confIgnoreFiles').value,
         maxFileSizeKB: parseInt($('confMaxFileSize').value, 10),
         maxResults: parseInt($('confMaxResults').value, 10),
         maxRecentSearches: parseInt($('confMaxRecent').value, 10),
@@ -1165,6 +1308,7 @@ changeFields.forEach(function (id) { const el = $(id); if (el) el.addEventListen
 
 $('reindexBtn').addEventListener('click', function () { vscode.postMessage({ type: 'rebuildIndex' }); });
 $('undoIndexBtn').addEventListener('click', function () { vscode.postMessage({ type: 'undoIndexSettings' }); });
+$('loadIgnoreBtn').addEventListener('click', function () { vscode.postMessage({ type: 'importIgnoreFile' }); });
 
 let cacheEntries = [];
 const selectedCaches = new Set();
@@ -1278,6 +1422,7 @@ function fill(value) {
     if (!value) return;
     $('confIncludeExt').value = value.includeExtensions || '';
     $('confExcludePat').value = value.excludePatterns || '';
+    $('confIgnoreFiles').value = value.ignoreFiles || '';
     $('confMaxFileSize').value = value.maxFileSizeKB || 512;
     $('confMaxResults').value = value.maxResults || 50;
     if (typeof value.maxRecentSearches === 'number') $('confMaxRecent').value = value.maxRecentSearches;
@@ -1299,6 +1444,26 @@ function fill(value) {
             ? 'Index is stale - changed: ' + pending.join(', ') + '. Reindex to commit them.'
             : '';
     }
+    renderIgnoreStats(value);
+}
+
+/** One line describing what each configured ignore file contributed. */
+function renderIgnoreStats(value) {
+    const line = $('ignoreStats');
+    if (!line) return;
+    const stats = Array.isArray(value.ignoreStats) ? value.ignoreStats : [];
+    const configured = String(value.ignoreFiles || '').split(',').map(function (entry) { return entry.trim(); }).filter(Boolean);
+    if (configured.length === 0) {
+        line.textContent = 'No ignore file loaded. Load .gitignore to skip build output and binaries.';
+        return;
+    }
+    const parts = stats.map(function (stat) {
+        const name = stat.file.replace(/\\\\/g, '/').split('/').pop();
+        if (!stat.exists) return name + ' (not found)';
+        return name + ' (' + stat.rules + ' rule' + (stat.rules === 1 ? '' : 's') + ')';
+    });
+    const total = typeof value.ignoreRuleCount === 'number' ? value.ignoreRuleCount : 0;
+    line.textContent = parts.join(', ') + (total ? ' - ' + total + ' rules applied' : '');
 }
 
 window.addEventListener('message', function (event) {
@@ -1376,6 +1541,14 @@ vscode.postMessage({ type: 'getCaches' });
                         <div class="setting-item">
                             <label>Exclude Patterns (Glob)</label>
                             <input type="text" id="confExcludePat" placeholder="{**/node_modules/**,...}" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Ignore Files (.gitignore, .loreignore)</label>
+                            <div class="setting-row">
+                                <input type="text" id="confIgnoreFiles" placeholder=".gitignore" />
+                                <button id="loadIgnoreBtn" class="setting-button" title="Pick an ignore file and add it here">Load…</button>
+                            </div>
+                            <div class="settings-group-note" id="ignoreStats"></div>
                         </div>
                         <div class="setting-item">
                             <label>Max File Size (KB)</label>
@@ -1493,6 +1666,10 @@ vscode.postMessage({ type: 'getCaches' });
                     .setting-item label { font-size: 0.85em; font-weight: bold; opacity: 0.9; }
                     .setting-item input { padding: 5px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); }
                     .setting-item input:focus { border-color: var(--vscode-focusBorder); }
+                    /* Input and its Load button share one row. */
+                    .setting-row { display: flex; align-items: stretch; gap: 6px; }
+                    .setting-row input { flex: 1 1 auto; min-width: 0; }
+                    .setting-button { flex: 0 0 auto; padding: 4px 10px; font-size: 0.85em; border-radius: 3px; }
                     /* Dropdowns are native widgets and ignore the panel theme unless told otherwise. */
                     .setting-item select {
                         width: 100%;

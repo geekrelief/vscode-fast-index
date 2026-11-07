@@ -2,6 +2,7 @@ import { parentPort } from 'worker_threads';
 import * as fs from 'fs';
 import { computeTrigrams } from './trigrams';
 import { BATCH_WINDOW } from './protocol';
+import { isBinaryContent } from './binary';
 
 interface BatchMessage {
     type: 'processBatch';
@@ -44,7 +45,13 @@ parentPort?.on('message', (message: BatchMessage | SingleMessage | AckMessage) =
             const stats = fs.statSync(message.filePath);
             if (stats.size > maxSizeBytes) return;
 
-            const content = fs.readFileSync(message.filePath, 'utf-8');
+            const raw = fs.readFileSync(message.filePath);
+            if (isBinaryContent(raw)) {
+                parentPort?.postMessage({ type: 'binaryFile', filePath: message.filePath });
+                return;
+            }
+
+            const content = raw.toString('utf8');
             const trigrams = computeTrigrams(content);
             parentPort?.postMessage({
                 type: 'singleDone',
@@ -78,7 +85,14 @@ async function processBatch(message: BatchMessage): Promise<void> {
                 continue;
             }
 
-            const content = fs.readFileSync(filePath, 'utf-8');
+            const raw = fs.readFileSync(filePath);
+            if (isBinaryContent(raw)) {
+                // Not a text file: tell the indexer so an older entry can be dropped.
+                parentPort?.postMessage({ type: 'binaryFile', filePath });
+                continue;
+            }
+
+            const content = raw.toString('utf8');
             const trigrams = computeTrigrams(content);
             parentPort?.postMessage({
                 type: 'fileDone',
