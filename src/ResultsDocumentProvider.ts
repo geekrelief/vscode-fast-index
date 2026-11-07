@@ -87,7 +87,11 @@ export async function buildResultsText(
     rows: ResultRow[],
     radius: number,
     readSource: (file: string) => Promise<string[]>
-): Promise<{ text: string; matchLines: Map<string, number> }> {
+): Promise<{
+    text: string;
+    matchLines: Map<string, number>;
+    hits: Array<{ documentLine: number; file: string; sourceLine: number }>;
+}> {
     const files = new Set(rows.map(row => row.fileName));
     const flags = [
         snapshot.isMatchCase ? 'CaseSensitive' : '',
@@ -110,6 +114,8 @@ export async function buildResultsText(
     const body: string[] = [];
     /** `${file}:${line}` (0-based) -> document line index of that hit. */
     const matchLines = new Map<string, number>();
+    /** Document line -> the hit on it, so the whole result line can be a Follow link. */
+    const hits: Array<{ documentLine: number; file: string; sourceLine: number }> = [];
     let currentFile = '';
 
     for (const row of rows) {
@@ -123,6 +129,7 @@ export async function buildResultsText(
         if (source.length === 0) {
             // The file went away between the search and the render: keep the hit itself.
             matchLines.set(row.file + ':' + row.line, body.length);
+            hits.push({ documentLine: body.length, file: row.file, sourceLine: row.line });
             body.push('  ' + pad(row.line + 1, 4) + ': ' + String(row.text ?? ''));
             continue;
         }
@@ -133,7 +140,10 @@ export async function buildResultsText(
         for (let index = start; index < end; index++) {
             const isMatch = index === row.line;
             const separator = isMatch ? ': ' : '  ';
-            if (isMatch) matchLines.set(row.file + ':' + index, body.length);
+            if (isMatch) {
+                matchLines.set(row.file + ':' + index, body.length);
+                hits.push({ documentLine: body.length, file: row.file, sourceLine: index });
+            }
             body.push('  ' + pad(index + 1, width) + separator + source[index]);
         }
     }
@@ -141,8 +151,9 @@ export async function buildResultsText(
     // The body starts after the header lines, the summary and one blank line.
     const offset = header.length + 2;
     for (const [key, index] of matchLines) matchLines.set(key, index + offset);
+    for (const hit of hits) hit.documentLine += offset;
 
-    return { text: [header.join('\n'), summary, '', body.join('\n')].join('\n'), matchLines };
+    return { text: [header.join('\n'), summary, '', body.join('\n')].join('\n'), matchLines, hits };
 }
 
 interface TreeNode {
@@ -184,3 +195,4 @@ export function orderRowsDepthFirst(rows: ResultRow[]): ResultRow[] {
 
     return ordered;
 }
+

@@ -36,7 +36,11 @@ export class ResultsView implements vscode.Disposable {
     public onFollowNavigate?: () => void;
     /** `${file}:${line}` -> document line of the matching hit, filled by render(). */
     private matchLines = new Map<string, number>();
+    /** One entry per result line, for the whole-line Follow link. */
+    private hits: Array<{ documentLine: number; file: string; sourceLine: number }> = [];
     private lastPeek?: { line: number; version: number; at: number };
+    /** When a link was last followed, so a click that navigated does not also peek. */
+    private lastFollowAt = 0;
 
     public constructor(
         private readonly getSnapshot: () => ResultsSnapshot | undefined,
@@ -48,10 +52,68 @@ export class ResultsView implements vscode.Disposable {
             this.provider,
             vscode.workspace.registerTextDocumentContentProvider(ResultsDocumentProvider.scheme, this.provider),
             vscode.commands.registerCommand('vscode-fast-index.openResultsInEditor', () => this.open()),
+            vscode.commands.registerCommand('vscode-fast-index.followResult', (file: string, line: number) =>
+                this.followResult(file, line)),
             vscode.window.onDidChangeTextEditorSelection(event => this.onSelection(event)),
-            vscode.window.onDidChangeActiveTextEditor(editor => this.onNavigatedIntoResultsGroup(editor))
+            vscode.window.onDidChangeActiveTextEditor(editor => this.onNavigatedIntoResultsGroup(editor)),
+            // VS Code's own search-result language only makes the line-number prefix of a hit
+            // followable (its definition range stops at the "12: " text). Link the whole line
+            // ourselves so ctrl+click works anywhere on it.
+            vscode.languages.registerDocumentLinkProvider({ scheme: ResultsDocumentProvider.scheme }, {
+                provideDocumentLinks: document => this.resultLinks(document),
+            })
         );
         return this.disposables;
+    }
+
+    private resultLinks(document: vscode.TextDocument): vscode.DocumentLink[] {
+        if (document.uri.toString() !== ResultsDocumentProvider.uri.toString()) return [];
+        const links: vscode.DocumentLink[] = [];
+        for (const hit of this.hits) {
+            if (hit.documentLine >= document.lineCount) continue;
+            const args = encodeURIComponent(JSON.stringify([hit.file, hit.sourceLine]));
+            links.push({
+                range: document.lineAt(hit.documentLine).range,
+                target: vscode.Uri.parse(`command:vscode-fast-index.followResult?${args}`),
+            });
+        }
+        return links;
+    }
+
+    /** Opens a hit next to the results, so following a link never hides them. */
+    private async followResult(file: string, line: number): Promise<void> {
+        this.lastFollowAt = Date.now();
+        try {
+            const document = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+            const position = new vscode.Position(Math.max(0, line), 0);
+            await vscode.window.showTextDocument(document, {
+                viewColumn: await this.neighbourColumn(),
+                preserveFocus: false,
+                selection: new vscode.Range(position, position),
+            });
+            // The caret just moved by navigation, not because the user picked a new term.
+            this.onFollowNavigate?.();
+        } catch {
+            /* the file went away since the search */
+        }
+    }
+
+    /** The group next to the results tab: above it when there is one, otherwise below. */
+    private async neighbourColumn(): Promise<vscode.ViewColumn | undefined> {
+        const host = this.resultsGroupColumn();
+        if (host === undefined) return undefined;
+        return (host > 1 ? host - 1 : host + 1) as vscode.ViewColumn;
+    }
+
+    /** Column of the group holding the results tab, if it is open. */
+    private resultsGroupColumn(): vscode.ViewColumn | undefined {
+        const target = ResultsDocumentProvider.uri.toString();
+        for (const group of vscode.window.tabGroups.all) {
+            const holds = group.tabs.some(tab =>
+                tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === target);
+            if (holds) return group.viewColumn;
+        }
+        return undefined;
     }
 
     /**
@@ -168,12 +230,13 @@ export class ResultsView implements vscode.Disposable {
         const groups = vscode.window.tabGroups.all;
         if (groups.length < 2) return;
 
-        const target = ResultsDocumentProvider.uri.toString();
-        const host = groups.find(group => group.tabs.some(tab =>
-            tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === target));
-        if (!host || editor.viewColumn !== host.viewColumn) return;
+        const host = this.resultsGroupColumn();
+        if (host === undefined || editor.viewColumn !== host) return;
+        // The click that opened this file was a follow; do not also peek at it.
+        this.lastFollowAt = Date.now();
 
-        const command = host.viewColumn > 1
+
+        const command = host > 1
             ? 'workbench.action.moveEditorToPreviousGroup'
             : 'workbench.action.moveEditorToNextGroup';
         // The editor has just been shown; move it once the workbench settles, then let the
@@ -294,6 +357,7 @@ export class ResultsView implements vscode.Disposable {
 
         const built = await buildResultsText(snapshot, rows, radius, readSource);
         this.matchLines = built.matchLines;
+        this.hits = built.hits;
         log(`results render ${rows.length} rows from ${filesRead} files in ${Date.now() - startedAt} ms`);
         return built.text;
     }
@@ -336,7 +400,13 @@ export class ResultsView implements vscode.Disposable {
             this.lastPeek.version === textEditor.document.version && now - this.lastPeek.at < 400) return;
         this.lastPeek = { line, version: textEditor.document.version, at: now };
 
-        void vscode.commands.executeCommand('editor.action.peekDefinition');
+        // A modifier-click follows a link instead (ctrl/cmd+click), and the two cannot be
+        // told apart from this event. Give the link a moment to take over: if a follow
+        // happened, do not also open a peek on top of the editor it just navigated to.
+        setTimeout(() => {
+            if (this.lastFollowAt >= now) return;
+            void vscode.commands.executeCommand('editor.action.peekDefinition');
+        }, 150);
     }
 
     public dispose(): void {
@@ -344,6 +414,8 @@ export class ResultsView implements vscode.Disposable {
         this.disposables.length = 0;
     }
 }
+
+
 
 
 
