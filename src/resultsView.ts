@@ -146,6 +146,13 @@ export class ResultsView implements vscode.Disposable {
             return;
         }
 
+        // Already open: reveal that tab. Opening again would split, and a split duplicates
+        // the active editor — which is the results tab itself when the user is reading it.
+        if (this.isOpen()) {
+            await this.surface();
+            return;
+        }
+
         this.opening = true;
         try {
             this.provider.setText(await this.render(snapshot));
@@ -258,10 +265,32 @@ export class ResultsView implements vscode.Disposable {
     /** Brings an already-open results tab to the front without moving keyboard focus. */
     private async surface(): Promise<void> {
         try {
+            // Earlier builds could leave a copy in every group the tab was moved through.
+            await this.closeDuplicateTabs();
             const document = await vscode.workspace.openTextDocument(ResultsDocumentProvider.uri);
             await vscode.window.showTextDocument(document, { preview: false, preserveFocus: true });
         } catch {
             /* the tab went away between the check and the call */
+        }
+    }
+
+    /** Leaves exactly one results tab open, keeping the first one found. */
+    private async closeDuplicateTabs(): Promise<void> {
+        const target = ResultsDocumentProvider.uri.toString();
+        const tabs: vscode.Tab[] = [];
+        for (const group of vscode.window.tabGroups.all) {
+            for (const tab of group.tabs) {
+                if (tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === target) tabs.push(tab);
+            }
+        }
+        if (tabs.length < 2) return;
+
+        const extra = tabs.slice(1);
+        try {
+            await vscode.window.tabGroups.close(extra, true);
+            log(`results: closed ${extra.length} duplicate tab(s)`);
+        } catch {
+            /* a tab closed by the user meanwhile */
         }
     }
 
@@ -426,6 +455,7 @@ export class ResultsView implements vscode.Disposable {
         this.disposables.length = 0;
     }
 }
+
 
 
 
