@@ -265,6 +265,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             vscode.window.onDidChangeActiveTextEditor(editor => {
                 // Switching editors is not a cursor move: only an explicit selection counts.
                 if (editor && !editor.selection.isEmpty) this.schedulePrefill();
+            }),
+            // Closing the results tab hands focus back to the editor it replaced, which fires
+            // a selection event with no user behind it. Without this pause the panel would
+            // immediately search for the word under that caret and reopen the tab it just lost.
+            vscode.window.tabGroups.onDidChangeTabs(event => {
+                const closedResults = event.closed.some(tab => {
+                    const input = tab.input;
+                    return input instanceof vscode.TabInputText
+                        && input.uri.scheme === 'fast-index-results';
+                });
+                if (!closedResults) return;
+                this.suppressPrefillUntil = Date.now() + 600;
+                log('results tab closed: editor prefills paused for 600ms');
             })
         );
     }
@@ -272,9 +285,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     /** Tracks where the user last clicked, so opening the panel can tell that from a file open. */
     private onEditorSelection(event: vscode.TextEditorSelectionChangeEvent): void {
         if (event.textEditor !== vscode.window.activeTextEditor) return;
-        // Opening a file parks the cursor at 0,0 and fires a "Command" selection
-        // change; only real pointer/keyboard moves may seed the search box.
-        if (event.kind === vscode.TextEditorSelectionChangeKind.Command) return;
+        // Opening a file parks the cursor at 0,0 and fires a "Command" selection change, and
+        // restoring focus (closing a tab, leaving the panel) fires one with no kind at all.
+        // Only pointer and keyboard moves are the user pointing at a word.
+        const kind = event.kind;
+        if (kind !== vscode.TextEditorSelectionChangeKind.Mouse
+            && kind !== vscode.TextEditorSelectionChangeKind.Keyboard) return;
         const active = event.selections[0]?.active;
         if (active) {
             this.lastUserCursor = {
