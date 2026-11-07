@@ -39,10 +39,39 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private _statusState: 'busy' | 'ready' | 'idle' = 'busy';
     /** True while an index build owns the index (mirrors the status, and the indexer). */
     private indexing = false;
+    /** True while the index is still being read from disk (before it can answer). */
+    private loadingIndex = false;
     /** The last search requested while indexing, replayed when the build ends. */
     private deferredSearch?: { value: string; isMatchCase: boolean; isRegex: boolean; include: string[]; exclude: string[]; filter: string; reason: string };
     /** Keeps the "prefill paused while indexing" log to one line per build. */
     private prefillPausedNoted = false;
+
+    /**
+     * The authoritative "the index cannot answer" state, used to gate searching and
+     * Auto Search. It deliberately ignores the status text: a status can be left busy
+     * by a build that never ran (no matching files, say), and that must not silently
+     * disable searching for the rest of the session.
+     */
+    private get indexPaused(): boolean {
+        return this.indexer.isBuilding === true || this.loadingIndex;
+    }
+
+    /** Called by the extension around the startup load, before the index can answer. */
+    public setLoadingIndex(value: boolean): void {
+        this.loadingIndex = value;
+    }
+
+    /**
+     * A build status can outlive its build (it never ran because nothing matched the
+     * filters, say). Searching and Auto Search already ignore that; this also unlocks
+     * the panel, which is disabled from the status alone.
+     */
+    private clearStaleBusy(): void {
+        if (!this.indexing || this.indexPaused) return;
+        log('indexing status was stale: search controls re-enabled');
+        this.indexing = false;
+        void this.postToViews({ type: 'busy', value: false, message: this._statusText });
+    }
 
     public setStatus(text: string, state: 'busy' | 'ready' | 'idle' = 'busy'): void {
         this._statusText = text;
@@ -74,7 +103,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
      * query answered mid-build would be wrong rather than merely stale.
      */
     private async runSearch(data: any): Promise<void> {
-        if (this.indexing || this.indexer.isBuilding) {
+        if (this.indexPaused) {
             this.deferredSearch = data;
             log(`search "${data.value}" deferred until the index build finishes`);
             return;
@@ -113,7 +142,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     private async resumeSearch(): Promise<void> {
         // The ready status is published before the indexer clears its flag: wait for it.
-        if (this.indexing || this.indexer.isBuilding) {
+        if (this.indexPaused) {
             setTimeout(() => void this.resumeSearch(), 200);
             return;
         }
@@ -1048,7 +1077,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     private prefillFromEditor(source: string = 'cursor'): void {
         // Auto Search is a search: while a build owns the index, the box stays put.
-        if (this.indexing || this.indexer.isBuilding) {
+        this.clearStaleBusy();
+        if (this.indexPaused) {
             if (!this.prefillPausedNoted) {
                 this.prefillPausedNoted = true;
                 log('prefill paused: the index is being built');

@@ -1089,6 +1089,7 @@ export class ProjectIndexer {
 
             if (selected.length === 0) {
                 vscode.window.showWarningMessage('Fast Index: this window has no workspace folder to index.');
+                this.reportReady();
                 return 'failed';
             }
 
@@ -1121,6 +1122,7 @@ export class ProjectIndexer {
             const total = plans.reduce((sum, plan) => sum + plan.paths.length, 0);
             if (total === 0) {
                 vscode.window.showWarningMessage('Fast Index: no files matched the current include/exclude settings.');
+                this.reportReady();
                 return 'failed';
             }
 
@@ -1186,7 +1188,7 @@ export class ProjectIndexer {
                     const needsSave = force || changed > 0 || removed > 0 || this.binaryRemovals > 0 || this.overlay.size > 0;
                     let savedBytes = 0;
                     if (needsSave) {
-                        this.onProgress?.(`Saving ${selected.length} folder${selected.length === 1 ? '' : 's'}…`);
+                        this.onProgress?.(`Saving ${selected.length} folder${selected.length === 1 ? '' : 's'}…`, true);
                         progress.report({ message: 'Saving index…' });
                         savedBytes = await this.saveToDisk(selected);
                         this.binaryRemovals = 0;
@@ -1222,6 +1224,14 @@ export class ProjectIndexer {
         }
     }
 
+    /** Publishes the current index size as a non-busy status, so no path leaves the UI busy. */
+    private reportReady(): void {
+        this.onProgress?.(
+            `Ready · ${this.fileIdOf.size.toLocaleString()} files · ${this.trigrams.length.toLocaleString()} terms`,
+            false
+        );
+    }
+
     private runBatch(
         plan: BuildPlan,
         maxFileSizeKB: number,
@@ -1250,12 +1260,21 @@ export class ProjectIndexer {
                 cleanup();
                 reject(err);
             };
+            // A worker that dies (out of memory, say) would otherwise leave the build
+            // waiting for a `batchDone` that never comes, and every search would stay
+            // deferred behind it.
+            const onExit = (code: number) => {
+                cleanup();
+                reject(new Error(`indexer worker stopped unexpectedly (exit ${code})`));
+            };
             const cleanup = () => {
                 this.worker.off('message', onMessage);
                 this.worker.off('error', onError);
+                this.worker.off('exit', onExit);
             };
             this.worker.on('message', onMessage);
             this.worker.on('error', onError);
+            this.worker.on('exit', onExit);
             // The worker counts its own window from zero for every batch.
             this.ackWindow = 0;
             this.worker.postMessage({

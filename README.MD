@@ -90,6 +90,13 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog
 
+### 0.29.0 → 0.29.1 — Auto Search no longer gets stuck off
+
+* **Fixed a regression from 0.28:** the "pause searching while indexing" guard was tied to the *status line*, not to the build. A status can be left saying "Indexing…" by a build that never ran — when no files match the include/exclude/ignore settings, `buildIndex` returned after a warning without publishing a ready status — and from then on Auto Search was silently disabled for the rest of the session (as were searches, since they were deferred behind a build that was not running).
+* Searching and Auto Search now ask the **indexer** whether a build is running, plus an explicit "still loading the index" flag set by the extension around the startup load. Both are real state that cannot get stuck.
+* The stale status un-sticks itself the next time an editor selection arrives: it is logged, the panel's busy state is cleared, and the prefill goes through.
+* Every path that publishes a busy status now publishes a ready one: `buildIndex`'s two early returns ("no workspace folder", "no files matched") and the `Saving…` message (which used to flip the UI to ready mid-build). A worker that dies now fails the build instead of leaving it waiting for a message that never comes, which would have kept searching paused forever.
+
 ### 0.28.0 → 0.29.0 — the panel font-size setting is gone
 
 * **`fastIndex.panelFontSize` has been removed**, along with the field in the settings form. It promised to size "the panel — search results, pinned searches, buttons", but the results and Pinned Searches sections have been native tree views since 0.21, and VS Code sizes those itself: an extension cannot set a tree's font size (there is no such API; `window.zoomLevel` is workspace-wide). The setting therefore only ever changed the search controls, so it misdescribed what it did.

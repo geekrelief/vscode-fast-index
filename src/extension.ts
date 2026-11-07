@@ -256,8 +256,14 @@ export async function activate(context: vscode.ExtensionContext) {
     // instead of staying blank while the index is read from disk.
     indexer.onProgress = (message, busy) => sidebarProvider.setStatus(message, busy ? 'busy' : 'ready');
     sidebarProvider.setStatus('Loading index…', 'busy');
+    sidebarProvider.setLoadingIndex(true);
 
-    const cache = await indexer.loadFromDisk();
+    let cache: Awaited<ReturnType<typeof indexer.loadFromDisk>>;
+    try {
+        cache = await indexer.loadFromDisk();
+    } finally {
+        sidebarProvider.setLoadingIndex(false);
+    }
     // A cached segment can still list files an ignore file now covers: drop them, and
     // journal the removal so the next load starts clean.
     const droppedByIgnore = indexer.removeIgnoredFiles();
