@@ -1,7 +1,0 @@
-{
-	"name": "Fast Index Results",
-	"scopeName": "text.fastIndexResults",
-	"patterns": [
-		{ "include": "text.searchResult" }
-	]
-}
