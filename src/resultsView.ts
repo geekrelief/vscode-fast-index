@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { log } from './log';
 import {
     ResultRow,
     ResultsDocumentProvider,
@@ -180,6 +181,8 @@ export class ResultsView implements vscode.Disposable {
     }
 
     private async render(snapshot: ResultsSnapshot): Promise<string> {
+        const startedAt = Date.now();
+        let documentsRead = 0;
         const configured = vscode.workspace.getConfiguration('fastIndex').get<number>('resultContextLines');
         const radius = Math.max(0, Math.min(50, Math.round(typeof configured === 'number' ? configured : 2)));
 
@@ -194,6 +197,7 @@ export class ResultsView implements vscode.Disposable {
                 const open = vscode.workspace.textDocuments.find(document => document.uri.fsPath === file);
                 const document = open ?? await vscode.workspace.openTextDocument(vscode.Uri.file(file));
                 lines = document.getText().split('\n');
+                documentsRead++;
             } catch {
                 lines = [];
             }
@@ -203,6 +207,7 @@ export class ResultsView implements vscode.Disposable {
 
         const built = await buildResultsText(snapshot, rows, radius, readSource);
         this.matchLines = built.matchLines;
+        log(`results render ${rows.length} rows from ${documentsRead} documents in ${Date.now() - startedAt} ms`);
         return built.text;
     }
 
@@ -252,3 +257,4 @@ export class ResultsView implements vscode.Disposable {
         this.disposables.length = 0;
     }
 }
+

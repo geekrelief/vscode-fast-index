@@ -103,11 +103,16 @@ export async function activate(context: vscode.ExtensionContext) {
         if (node && node.kind === 'match') resultsView.reveal(node.row.file, node.row.line);
     }));
     sidebarProvider.onResults = (snapshot, reason) => {
+        const startedAt = Date.now();
         resultsTree.setResults((snapshot?.rows ?? []) as ResultRow[], sidebarProvider.showContextLineEnabled());
+        const treeMs = Date.now() - startedAt;
         // Only a real search may pop the tab open; re-ordering the panel must not.
         const autoOpen = reason === 'search'
             && vscode.workspace.getConfiguration('fastIndex').get<boolean>('autoOpenResults') === true;
-        void resultsView.sync(autoOpen);
+        void resultsView.sync(autoOpen).then(() => {
+            log(`results view ${autoOpen ? 'sync(opening)' : 'sync'} -> ${(snapshot?.rows ?? []).length} rows in ` +
+                `${Date.now() - startedAt} ms (tree ${treeMs} ms)`);
+        });
     };
     // Resting on a result scrolls the results tab to that hit (no preview pane).
     sidebarProvider.onHover = (file: string, line: number) => resultsView.reveal(file, line);

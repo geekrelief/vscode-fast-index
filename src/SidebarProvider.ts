@@ -884,6 +884,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         const perRoot = new Map<string, number>();
         const overflow: string[] = [];
         const concurrency = 20;
+        const startedAt = Date.now();
+        let filesRead = 0;
+        let bytesRead = 0;
 
         const readMatches = async (file: string): Promise<any[]> => {
             const fileResults: any[] = [];
@@ -896,6 +899,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 const openDocument = vscode.workspace.textDocuments.find(document => document.uri.fsPath === file);
                 const content = openDocument ? openDocument.getText() : await fs.promises.readFile(file, 'utf-8');
                 readOk = true;
+                filesRead++;
+                bytesRead += content.length;
                 searchRegex.lastIndex = 0;
                 let match;
 
@@ -955,7 +960,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         // files whose folder had already used up its share.
         for (let pass = 0; pass < 2 && snippets.length < maxResults; pass++) {
             const list = pass === 0 ? files : overflow;
-            for (let i = 0; i < list.length && snippets.length < maxResults; i += concurrency) {
+            // Stop once the results plus deferred files can fill the list. Without the
+            // second bound, one root with no matches makes pass 0 read every candidate.
+            for (let i = 0; i < list.length && snippets.length < maxResults
+                && snippets.length + overflow.length < maxResults; i += concurrency) {
                 if (isStale?.()) return [];   // a newer search took over: stop reading files
                 const batch = list.slice(i, i + concurrency);
                 const reads = await Promise.all(batch.map(readMatches));
@@ -982,6 +990,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             if (overflow.length === 0) break;
         }
 
+        log(`snippets "${query}" -> ${snippets.length} rows from ${filesRead} files ` +
+            `(${(bytesRead / 1048576).toFixed(1)} MB) in ${Date.now() - startedAt} ms`);
         return snippets.slice(0, maxResults);
     }
 
