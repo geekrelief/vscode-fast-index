@@ -62,7 +62,7 @@ When indexing starts on its own: the **first** build always asks, so an ignore f
 * **Open the results editor automatically:** on/off (default off, also `fastIndex.autoOpenResults`). When on, a search that finds matches reopens the results tab if you closed it — without stealing focus, so you can keep typing in the panel.
 * **Auto Search: Follows text editor cursor and selection:** on/off.
 * **Auto Search from the results window:** on/off (default off, also `fastIndex.autoSearchFromResults`). Off means selecting a line in the results editor never disturbs your query; on means that selection fills the search box like an editor selection would.
-* **Cached indexes:** The settings panel lists every cached workspace folder with its build date and size. Tick the ones you want to drop (or **Select all**) and press **Delete selected**; a confirmation dialog is shown before anything is deleted. **Reindex selected** re-scans only the ticked folders and leaves the other caches untouched. Caches whose folder no longer exists are marked **missing**, and **Delete stale** removes all of them in one confirmed step. A deleted folder is re-indexed only when you run **Fast Index: Build Project Index**.
+* **Cached indexes:** The settings panel lists every cached workspace folder with its build date and size, and the list **refreshes after every build** — the sizes and dates you see are the ones on disk, not the ones from when the panel opened. Tick the ones you want to drop (or **Select all**) and press **Delete selected**; a confirmation dialog is shown before anything is deleted. **Reindex selected** re-scans only the ticked folders, skipping files whose size and timestamp are unchanged, and leaves the other caches untouched; ticking **every** folder counts as a full build, so it also clears the stale-settings banner. **Rebuild all** (in the Indexing group) is the bigger hammer: it re-reads every file in every folder and ignores the stored timestamps. Caches whose folder no longer exists are marked **missing**, and **Delete stale** removes all of them in one confirmed step. A deleted folder is re-indexed only when you run **Fast Index: Build Project Index**. **Open folder** (or the palette's *Fast Index: Open Index Folder in Explorer*) reveals the folder that holds the segment files, so you can see them, copy them, or clear them by hand.
 
 ## Where the index lives
 
@@ -87,6 +87,13 @@ The index is built from trigrams: every word of three or more characters contrib
 The results tab is a real editor, so its highlighting is the editor's own: no theme parsing or token mapping lives in this extension any more.
 
 ## Changelog
+
+### 0.23.0 → 0.24.0 — cache rows that stay current, one clear rebuild path, open the index folder
+
+* **The Cached indexes list now refreshes after a build.** Previously it was read once when the settings section loaded, so a reindex left the old sizes and dates on screen. The row data always came from the segment files on disk (they are re-stat'ed), but nothing re-sent it; every build path — the buttons, the palette command, the first-run prompt and the automatic rebuild on activation — now repaints the section, with the sizes and dates the build just wrote.
+* **"Reindex selected" with every folder ticked clears the stale banner.** The banner is driven by the settings snapshot the last full build consumed, and only a build with no folder filter used to update it — so rebuilding the whole workspace through the cache list left it claiming the index was stale. A selection that covers every workspace folder now counts as a full build (case and separators normalized), while a partial one still leaves the banner alone and only refreshes the rows.
+* **Two differently-named buttons.** The old pair both said "Reindex" while doing different work: the Indexing group's button force-re-reads everything (it ignores stored file times), and the cache list's only re-scans the ticked folders and skips unchanged files. They are now **Rebuild all** and **Reindex selected**, each with a tooltip that says which one is cheap and which one is thorough.
+* **Open folder.** A new link in the Cached indexes header, and the palette command **Fast Index: Open Index Folder in Explorer**, reveal the folder that holds the segment files (`…/globalStorage/eric.vscode-fast-index/fast-index`) in Explorer/Finder. Since that folder lives outside the workspace, VS Code's own Explorer cannot show it — this opens the OS file manager instead.
 
 ### 0.22.3 → 0.23.0 — ignore files, binary detection and the results-line fix
 

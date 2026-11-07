@@ -13,6 +13,16 @@ const SKIPPED_KEY = 'fastIndex.skippedRoots';
 
 const normalize = (p: string): string => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 
+/**
+ * True when a folder selection covers every workspace folder, i.e. "Reindex selected"
+ * with everything ticked is a full build and must clear the stale-settings banner.
+ */
+export function coversEveryFolder(only: string[] | undefined, roots: string[]): boolean {
+    if (!only || only.length === 0) return true;
+    const selected = only.map(normalize);
+    return roots.every(root => selected.includes(normalize(root)));
+}
+
 export async function activate(context: vscode.ExtensionContext) {
     const indexer = new ProjectIndexer(context.storageUri, context.globalStorageUri);
     const folderPaths = (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath);
@@ -29,8 +39,10 @@ export async function activate(context: vscode.ExtensionContext) {
                 skipped.clear();
                 await context.globalState.update(SKIPPED_KEY, []);
             }
-            // A full build is the only thing that clears every folder's staleness.
-            if (!only) sidebarProvider.markIndexed();
+            // "Reindex selected" with every folder ticked is a full build too, so it must
+            // clear the stale-settings banner; a partial one only needs fresh cache rows.
+            if (coversEveryFolder(only, indexer.rootPaths)) sidebarProvider.markIndexed();
+            else await sidebarProvider.refreshCacheList();
         }
         return saved;
     };
@@ -185,6 +197,7 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('vscode-fast-index.toggleSettings', () => sidebarProvider.showSettings()),
         // Palette entry for loading a `.gitignore`-style file into fastIndex.ignoreFiles.
         vscode.commands.registerCommand('vscode-fast-index.importIgnoreFile', () => sidebarProvider.importIgnoreFile()),
+        vscode.commands.registerCommand('vscode-fast-index.openCacheFolder', () => sidebarProvider.openCacheFolder()),
         vscode.commands.registerCommand('vscode-fast-index.showMenu', async () => {
             const items: (vscode.QuickPickItem & { id: string })[] = [
                 { id: 'pinned', label: '$(pin) Show or hide pinned searches' },

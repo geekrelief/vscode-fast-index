@@ -167,6 +167,32 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         // A fresh build may be asked about the next pending change, even a repeat of this one.
         this.promptedIndexSignature = '';
         this.sendConfig();
+        // The caches were just rewritten: their sizes and build dates changed.
+        void this.refreshCacheList();
+    }
+
+    /** Re-reads the cached segments and repaints the Cached indexes section. */
+    public async refreshCacheList(): Promise<void> {
+        this.postToViews({ type: 'cacheList', value: await this.indexer.listCaches() });
+    }
+
+    /** Shows the folder that holds the index segments in the OS file manager. */
+    public async openCacheFolder(): Promise<void> {
+        const dir = this.indexer.cacheDirPath;
+        if (!dir) {
+            vscode.window.showWarningMessage('Fast Index: this window has no storage folder for the index.');
+            return;
+        }
+        try {
+            // Selects the folder in Explorer/Finder rather than opening a new window.
+            await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(dir));
+        } catch {
+            try {
+                await vscode.env.openExternal(vscode.Uri.file(dir));
+            } catch (error: any) {
+                vscode.window.showErrorMessage(`Fast Index: could not open ${dir} (${error?.message ?? error})`);
+            }
+        }
     }
 
     /** Restores the index-affecting settings the current index was built with. */
@@ -704,7 +730,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 }
                 case 'rebuildIndex': {
                     this.promptedIndexSignature = '';
-                    vscode.commands.executeCommand('vscode-fast-index.buildIndex');
+                    // Await, so the cache list below shows the new sizes and dates.
+                    await vscode.commands.executeCommand('vscode-fast-index.buildIndex');
+                    await this.refreshCacheList();
+                    break;
+                }
+                case 'openCacheFolder': {
+                    await this.openCacheFolder();
                     break;
                 }
                 case 'undoIndexSettings': {
@@ -1309,6 +1341,7 @@ changeFields.forEach(function (id) { const el = $(id); if (el) el.addEventListen
 $('reindexBtn').addEventListener('click', function () { vscode.postMessage({ type: 'rebuildIndex' }); });
 $('undoIndexBtn').addEventListener('click', function () { vscode.postMessage({ type: 'undoIndexSettings' }); });
 $('loadIgnoreBtn').addEventListener('click', function () { vscode.postMessage({ type: 'importIgnoreFile' }); });
+$('openCacheFolderBtn').addEventListener('click', function () { vscode.postMessage({ type: 'openCacheFolder' }); });
 
 let cacheEntries = [];
 const selectedCaches = new Set();
@@ -1558,7 +1591,7 @@ vscode.postMessage({ type: 'getCaches' });
                             <span class="reindex-text" id="reindexText"></span>
                             <button id="undoIndexBtn" class="link-btn" title="Restore the include/exclude/size settings the current index was built with">Undo changes</button>
                         </div>
-                        <button id="reindexBtn" title="Rebuild the index with the current settings.">🔁 Reindex</button>
+                        <button id="reindexBtn" title="Re-read every file in every folder with the current settings (ignores stored file times).">🔁 Rebuild all</button>
                     </section>
 
                     <section class="settings-group">
@@ -1567,10 +1600,11 @@ vscode.postMessage({ type: 'getCaches' });
                             <div class="cache-head">
                                 <label title="Select every cached folder"><input type="checkbox" id="cacheSelectAll" /> Select all</label>
                                 <span class="cache-summary" id="cacheSummary">Loading…</span>
+                                <button id="openCacheFolderBtn" class="link-btn" title="Show the index files in File Explorer">Open folder</button>
                             </div>
                             <div class="cache-list" id="cacheList"></div>
                             <div class="cache-actions">
-                                <button id="reindexCachesBtn" disabled>Reindex selected</button>
+                                <button id="reindexCachesBtn" disabled title="Re-scan only the ticked folders, skipping files that have not changed.">Reindex selected</button>
                                 <button id="deleteCachesBtn" class="danger" disabled>Delete selected</button>
                                 <button id="deleteStaleBtn" class="danger" disabled>Delete stale</button>
                             </div>
@@ -1698,7 +1732,7 @@ vscode.postMessage({ type: 'getCaches' });
                     .cache-section { display: flex; flex-direction: column; gap: 6px; }
                     .cache-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 0.8em; }
                     .cache-head label { display: flex; align-items: center; gap: 4px; cursor: pointer; font-weight: bold; opacity: 0.9; }
-                    .cache-summary { opacity: 0.75; font-variant-numeric: tabular-nums; }
+                    .cache-summary { opacity: 0.75; font-variant-numeric: tabular-nums; margin-left: auto; }
                     .cache-list { display: flex; flex-direction: column; gap: 1px; max-height: 190px; overflow-y: auto; border: 1px solid var(--vscode-widget-border); border-radius: 3px; padding: 2px; }
                     .cache-row { display: flex; align-items: center; gap: 6px; padding: 3px 4px; font-size: 0.8em; cursor: pointer; }
                     .cache-row:hover { background: var(--vscode-list-hoverBackground); }

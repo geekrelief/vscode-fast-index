@@ -3,7 +3,7 @@
   "displayName": "Fast Project Indexer ",
   "description": "Lightning-fast text search for VS Code using a background inverted trigram index.",
   "publisher": "eric",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "engines": {
     "vscode": "^1.108.0"
   },
@@ -129,6 +129,11 @@
         "command": "vscode-fast-index.importIgnoreFile",
         "title": "Fast Index: Load Ignore File for Indexing",
         "icon": "$(file)"
+      },
+      {
+        "command": "vscode-fast-index.openCacheFolder",
+        "title": "Fast Index: Open Index Folder in Explorer",
+        "icon": "$(folder-opened)"
       }
     ],
     "menus": {
