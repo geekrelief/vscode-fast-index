@@ -6,3 +6,8 @@ package-lock.json
 .gitignore
 node_modules/**
 **/*.ts
+bench/**
+docs/**
+*.vsix
+__lbl/**
+.acl-recovery/**
