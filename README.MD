@@ -90,6 +90,12 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog
 
+### 0.29.1 → 0.29.2 — the title-bar lock button follows a restored lock
+
+* **The lock button showed the wrong action after a reload.** The lock is persisted (`fastIndex.locked`), but the title bar chooses between the 🔒 Lock and 🔓 Unlock buttons from the `fastIndex.locked` **context key**, and that key was only written when the user toggled the lock. A session that started locked therefore drew the *Lock* button: clicking it set the state it already had, so the icon never changed while searching stayed frozen.
+* The stored state is now published as the context key when the provider is created, so a restored lock immediately shows Unlock, and a fresh session publishes `false` so Lock shows. `setLock` uses the same helper, so both paths stay in step.
+* Persistence itself is unchanged and still intentional: the lock survives reloads (per `fastIndex.locked`), which is what makes a restored session start frozen.
+
 ### 0.29.0 → 0.29.1 — Auto Search no longer gets stuck off
 
 * **Fixed a regression from 0.28:** the "pause searching while indexing" guard was tied to the *status line*, not to the build. A status can be left saying "Indexing…" by a build that never ran — when no files match the include/exclude/ignore settings, `buildIndex` returned after a warning without publishing a ready status — and from then on Auto Search was silently disabled for the rest of the session (as were searches, since they were deferred behind a build that was not running).

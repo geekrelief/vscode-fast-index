@@ -497,8 +497,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.locked = Boolean(value);
         this.lockNoticed = false;
         void this.memento?.update('fastIndex.locked', this.locked);
-        void vscode.commands.executeCommand('setContext', 'fastIndex.locked', this.locked);
+        this.publishLockContext();
         void this.postToViews({ type: 'locked', value: this.locked });
+    }
+
+    /** Keeps the title-bar lock/unlock buttons in step with the stored state. */
+    private publishLockContext(): void {
+        try {
+            void vscode.commands.executeCommand('setContext', 'fastIndex.locked', this.locked);
+        } catch {
+            /* a host without setContext keeps the default button */
+        }
     }
 
     public showSettings(): void {
@@ -538,6 +547,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         private readonly memento?: vscode.Memento
     ) {
         this.locked = memento?.get<boolean>('fastIndex.locked', false) === true;
+        // The title bar swaps Lock for Unlock from this context key. A session that
+        // starts locked has to publish it, or the icon shows the wrong action until the
+        // user toggles it (the stored state was only applied inside setLock before).
+        this.publishLockContext();
 
         const saves = vscode.workspace.getConfiguration('fastIndex').get<boolean>('persistPinnedSearches') !== false;
         if (saves && memento) {
