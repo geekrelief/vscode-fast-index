@@ -165,12 +165,18 @@ export class IgnoreRules {
 
     /**
      * Glob equivalents for `findFiles`, which can only exclude, never re-include.
-     * Negated rules are deliberately left out: their effect is applied by
-     * `matches`, and git itself does not re-include files inside an ignored folder.
+     *
+     * A directory rule can always be pruned: git will not re-include a file whose
+     * parent folder is excluded, so pruning matches git exactly. A *file* rule
+     * (`*.log`, `*.dll`) cannot be pruned when the set contains a negation, because
+     * `!keep.log` would then be pruned before `matches()` ever sees it. Rules with
+     * braces are left out too: `findFiles` takes one brace-glob string, which such a
+     * pattern would break.
      */
     public toGlobs(): string[] {
         const globs: string[] = [];
         const seen = new Set<string>();
+        const hasNegations = this.rules.some(rule => rule.negated);
         for (const rule of this.rules) {
             if (rule.negated) continue;
             let body = rule.source.replace(/\\/g, '/');
@@ -178,9 +184,9 @@ export class IgnoreRules {
             const anchoredBySlash = body.startsWith('/');
             if (anchoredBySlash) body = body.slice(1);
             const directory = body.endsWith('/');
+            if (!directory && hasNegations) continue;
             body = body.replace(/\/+$/, '').replace(/\/\*\*$/, '');
             if (!body) continue;
-            // Braces and commas would break the single brace-glob findFiles takes.
             if (/[{}]/.test(body)) continue;
 
             const anchored = anchoredBySlash || body.includes('/');

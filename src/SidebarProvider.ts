@@ -735,6 +735,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     await this.refreshCacheList();
                     break;
                 }
+                case 'reindexNow': {
+                    // The banner's action: apply the changed settings everywhere, but let the
+                    // indexer skip files whose size and timestamp are unchanged.
+                    this.promptedIndexSignature = '';
+                    const roots = this.indexer.rootPaths;
+                    if (roots.length === 0) break;
+                    await vscode.commands.executeCommand('vscode-fast-index.reindexFolders', roots);
+                    await this.refreshCacheList();
+                    break;
+                }
                 case 'openCacheFolder': {
                     await this.openCacheFolder();
                     break;
@@ -1342,6 +1352,7 @@ $('reindexBtn').addEventListener('click', function () { vscode.postMessage({ typ
 $('undoIndexBtn').addEventListener('click', function () { vscode.postMessage({ type: 'undoIndexSettings' }); });
 $('loadIgnoreBtn').addEventListener('click', function () { vscode.postMessage({ type: 'importIgnoreFile' }); });
 $('openCacheFolderBtn').addEventListener('click', function () { vscode.postMessage({ type: 'openCacheFolder' }); });
+$('reindexNowBtn').addEventListener('click', function () { vscode.postMessage({ type: 'reindexNow' }); });
 
 let cacheEntries = [];
 const selectedCaches = new Set();
@@ -1474,7 +1485,7 @@ function fill(value) {
     const text = $('reindexText');
     if (text) {
         text.textContent = pending.length
-            ? 'Index is stale - changed: ' + pending.join(', ') + '. Reindex to commit them.'
+            ? 'Index is stale - changed: ' + pending.join(', ') + '. Reindex now (unchanged files are skipped).'
             : '';
     }
     renderIgnoreStats(value);
@@ -1566,7 +1577,7 @@ vscode.postMessage({ type: 'getCaches' });
 
                     <section class="settings-group">
                         <h3 class="settings-group-title">Indexing</h3>
-                        <p class="settings-group-note">These shape the index itself. Changing them makes the existing index stale until you reindex.</p>
+                        <p class="settings-group-note">These shape the index itself. Changing them makes the existing index stale until you reindex: <strong>Reindex now</strong> (in the banner) applies them to every folder and re-reads only files that changed, which is all a settings change needs. <strong>Rebuild all</strong> force-re-reads every file and is only worth it if you suspect the cache itself is wrong.</p>
                         <div class="setting-item">
                             <label>Include Extensions (e.g., ts,js,md)</label>
                             <input type="text" id="confIncludeExt" placeholder="Leave empty for all" />
@@ -1589,7 +1600,8 @@ vscode.postMessage({ type: 'getCaches' });
                         </div>
                         <div class="reindex-banner" id="reindexHint" style="display: none;">
                             <span class="reindex-text" id="reindexText"></span>
-                            <button id="undoIndexBtn" class="link-btn" title="Restore the include/exclude/size settings the current index was built with">Undo changes</button>
+                            <button id="reindexNowBtn" class="link-btn" title="Apply the changed settings to every folder, re-reading only files whose size or timestamp changed.">Reindex now</button>
+                            <button id="undoIndexBtn" class="link-btn" title="Restore the include/exclude/ignore/size settings the current index was built with">Undo changes</button>
                         </div>
                         <button id="reindexBtn" title="Re-read every file in every folder with the current settings (ignores stored file times).">🔁 Rebuild all</button>
                     </section>
@@ -1603,8 +1615,9 @@ vscode.postMessage({ type: 'getCaches' });
                                 <button id="openCacheFolderBtn" class="link-btn" title="Show the index files in File Explorer">Open folder</button>
                             </div>
                             <div class="cache-list" id="cacheList"></div>
+                            <p class="settings-group-note">Reindex selected applies changed index settings to the ticked folders and skips files whose size and timestamp are unchanged. Tick all folders to commit a settings change workspace-wide.</p>
                             <div class="cache-actions">
-                                <button id="reindexCachesBtn" disabled title="Re-scan only the ticked folders, skipping files that have not changed.">Reindex selected</button>
+                                <button id="reindexCachesBtn" disabled title="Ticked folders only; files that have not changed are skipped.">Reindex selected</button>
                                 <button id="deleteCachesBtn" class="danger" disabled>Delete selected</button>
                                 <button id="deleteStaleBtn" class="danger" disabled>Delete stale</button>
                             </div>
@@ -1757,8 +1770,9 @@ vscode.postMessage({ type: 'getCaches' });
                     .tool-btn:hover { background: var(--vscode-button-secondaryHoverBackground); }
                     .lock-badge { font-size: 0.8em; padding: 1px 8px; border-radius: 8px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); white-space: nowrap; }
                     .setting-hint { font-size: 0.85em; opacity: 0.85; margin-top: 4px; }
-                    .reindex-banner { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 6px 8px; border-radius: 4px; background: var(--vscode-inputValidation-warningBackground, rgba(255, 204, 0, 0.15)); border: 1px solid var(--vscode-inputValidation-warningBorder, rgba(255, 204, 0, 0.5)); font-size: 0.85em; }
-                    .reindex-text { flex: 1; }
+                    .reindex-banner { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 6px; padding: 6px 8px; border-radius: 4px; background: var(--vscode-inputValidation-warningBackground, rgba(255, 204, 0, 0.15)); border: 1px solid var(--vscode-inputValidation-warningBorder, rgba(255, 204, 0, 0.5)); font-size: 0.85em; }
+                    .reindex-text { flex: 1 1 100%; }
+                    .reindex-banner .link-btn { white-space: nowrap; }
                     .link-btn { background: transparent; border: none; padding: 0; cursor: pointer; color: var(--vscode-textLink-foreground); font-size: 1em; text-decoration: underline; }
                     .link-btn:hover { color: var(--vscode-textLink-activeForeground); }
                     .results-count { margin-left: auto; font-size: 0.8em; opacity: 0.7; }
