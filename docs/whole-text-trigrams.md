@@ -98,6 +98,41 @@ The trade is real and legible: **2.8× disk, +1 s startup, 1.7× build — for t
 One thing that did **not** change: regex queries still cannot be pruned (`search()` returns
 every indexed file for `isRegex`), and case-insensitive-only matching is unchanged.
 
+## Build speed: a quadratic that the wider term set exposed
+
+The first fresh rebuild after switching to whole-text trigrams stalled — the progress
+counter froze around 6k of 137k files. It was not the notification:
+
+- ddFile called contains(this.postingsFor(term), fileId) for **every term of every
+  file**, and postingsFor rebuilds the merged posting list as a new Uint32Array, then
+  the caller immediately evicted it from the decode cache. The total cost is Σ(df²): ~2.3s
+  per 1,000 files at the start, 14.8s per 1,000 by file 14,000 — hours for the full tree.
+- A new file's id is larger than every id already indexed, so that check is provably false
+  for it. Skipping it when the file is new makes the build linear.
+- The per-file dirty set (~40 KB each) is also only needed for *re-indexed* files; keeping
+  it for every new file cost multiple GB. It is now created only when an existing file is
+  updated.
+- The worker sent all 137k results without waiting for the indexer to apply them, so the
+  unread messages piled up while the main thread fell behind — the visible symptom of a
+  minute-long freeze. It now sends in windows of 128 and waits for an ck
+  (src/protocol.ts), which keeps the queue and the heap flat.
+
+Measured after the fixes, one thread, whole tree:
+
+| stage | before | after |
+|---|---|---|
+| ddFile per 1,000 files | 2.3 s → 14.8 s (growing) | ~0.6 s, flat |
+| hot path, 137k files | hours | 165 s |
+| worker pass (read + extract + messaging + acks) | — | 80 s, heap flat at 33 MB |
+| full uildIndex() including save and reload | — | **122 s** |
+| resulting segment | — | 91.8 MB, 873,275 terms, 155,145,499 postings |
+
+The produced segment is byte-for-byte equivalent to the independently built one (same
+873,275 terms and 155,145,499 postings), and search() on it returns the same candidate
+counts measured earlier. Peak heap during the build is still ~2.3 GB, most of it the
+155M posting ids held as JavaScript numbers in the overlay; a compact posting store is the
+obvious next step if that matters.
+
 ## Seeing the term count
 
 The number is reported in four places now: the indexing notification
@@ -119,5 +154,6 @@ node bench/test-whole-text-trigrams.js
 
 `bench/build-index.js --extractor=words` rebuilds with the previous selection, which is the
 control that reproduced the stored index.
+
 
 

@@ -6,6 +6,7 @@ import * as zlib from 'zlib';
 import * as crypto from 'crypto';
 import { computeTrigrams, queryTrigrams } from './trigrams';
 import { log } from './log';
+import { BATCH_WINDOW } from './protocol';
 
 export interface CacheLoadResult {
     status: 'loaded' | 'partial' | 'missing';
@@ -352,6 +353,8 @@ export class ProjectIndexer {
     private journalPending = new Map<number, string[]>();
     private journalTimers = new Map<number, ReturnType<typeof setTimeout>>();
     private worker: Worker;
+    /** Results applied since the worker was last acknowledged. */
+    private ackWindow = 0;
 
     constructor(workspaceStorage: vscode.Uri | undefined, globalStorage: vscode.Uri | undefined) {
         const storage = globalStorage ?? workspaceStorage;
@@ -383,6 +386,11 @@ export class ProjectIndexer {
                     if (rootIndex >= 0) {
                         this.queueJournal(rootIndex, JSON.stringify({ p: msg.filePath, t: msg.trigrams, m: mtime, s: size }) + '\n');
                     }
+                }
+                // Applied: let the worker produce the next window.
+                if (msg.type === 'fileDone' && ++this.ackWindow >= BATCH_WINDOW) {
+                    this.ackWindow = 0;
+                    this.worker.postMessage({ type: 'ack' });
                 }
             }
         });
@@ -479,6 +487,7 @@ export class ProjectIndexer {
 
     private addFile(filePath: string, trigrams: string[], mtime: number, size: number): void {
         let fileId = this.fileIdOf.get(filePath);
+        const isNewFile = fileId === undefined;
         if (fileId === undefined) {
             const rootIndex = this.rootIndexFor(filePath);
             if (rootIndex < 0) return; // outside every workspace folder
@@ -488,11 +497,14 @@ export class ProjectIndexer {
             this.fileSizes[fileId] = size;
         }
 
-        const current = new Set<number>();
+        const current = isNewFile ? undefined : new Set<number>();
         for (const trigram of trigrams) {
             const trigramId = this.trigramIdFor(trigram);
-            current.add(trigramId);
-            if (contains(this.postingsFor(trigramId), fileId)) continue;
+            current?.add(trigramId);
+            // A new file's id is larger than every id already in the index, so no posting
+            // list can hold it. Skipping the check keeps a fresh build linear instead of
+            // decoding (and re-decoding) a list per term, which is what made it quadratic.
+            if (!isNewFile && contains(this.postingsFor(trigramId), fileId)) continue;
 
             let extra = this.overlay.get(trigramId);
             if (!extra) {
@@ -502,7 +514,9 @@ export class ProjectIndexer {
             insertSorted(extra, fileId);
             this.decoded.delete(trigramId);
         }
-        this.dirty.set(fileId, current);
+        // Only a re-indexed file can leave stale postings behind; a new id has none, so
+        // tracking its term set would just cost ~40 KB per file for no benefit.
+        if (current) this.dirty.set(fileId, current);
     }
 
     // ---- postings access ---------------------------------------------------------
@@ -1051,6 +1065,8 @@ export class ProjectIndexer {
             };
             this.worker.on('message', onMessage);
             this.worker.on('error', onError);
+            // The worker counts its own window from zero for every batch.
+            this.ackWindow = 0;
             this.worker.postMessage({
                 type: 'processBatch',
                 paths: plan.paths,
@@ -1453,4 +1469,5 @@ async function writeSegmentFile(
     await fs.promises.rename(tmp, file);
     return compressed.length;
 }
+
 
