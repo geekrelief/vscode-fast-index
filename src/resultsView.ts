@@ -28,6 +28,12 @@ export class ResultsView implements vscode.Disposable {
     private rebuildQueued = false;
     private opening = false;
     private syncQueued = false;
+    /**
+     * Called when a file opened inside the results group had to be moved out of it, so the
+     * host can pause editor prefills: a follow link selects the hit, and that selection is
+     * not a new query.
+     */
+    public onFollowNavigate?: () => void;
     /** `${file}:${line}` -> document line of the matching hit, filled by render(). */
     private matchLines = new Map<string, number>();
     private lastPeek?: { line: number; version: number; at: number };
@@ -42,7 +48,8 @@ export class ResultsView implements vscode.Disposable {
             this.provider,
             vscode.workspace.registerTextDocumentContentProvider(ResultsDocumentProvider.scheme, this.provider),
             vscode.commands.registerCommand('vscode-fast-index.openResultsInEditor', () => this.open()),
-            vscode.window.onDidChangeTextEditorSelection(event => this.onSelection(event))
+            vscode.window.onDidChangeTextEditorSelection(event => this.onSelection(event)),
+            vscode.window.onDidChangeActiveTextEditor(editor => this.onNavigatedIntoResultsGroup(editor))
         );
         return this.disposables;
     }
@@ -148,6 +155,35 @@ export class ResultsView implements vscode.Disposable {
         const target = ResultsDocumentProvider.uri.toString();
         const input = vscode.window.tabGroups.activeTabGroup?.activeTab?.input;
         return input instanceof vscode.TabInputText && input.uri.toString() === target;
+    }
+
+    /**
+     * The results tab has its own group: a file that opens there — Follow link (ctrl+click)
+     * or any other open — is moved to the neighbouring group, so the results stay in view
+     * instead of being replaced by the file the link pointed at.
+     */
+    private onNavigatedIntoResultsGroup(editor: vscode.TextEditor | undefined): void {
+        if (!editor) return;
+        if (editor.document.uri.scheme === ResultsDocumentProvider.scheme) return;
+        const groups = vscode.window.tabGroups.all;
+        if (groups.length < 2) return;
+
+        const target = ResultsDocumentProvider.uri.toString();
+        const host = groups.find(group => group.tabs.some(tab =>
+            tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === target));
+        if (!host || editor.viewColumn !== host.viewColumn) return;
+
+        const command = host.viewColumn > 1
+            ? 'workbench.action.moveEditorToPreviousGroup'
+            : 'workbench.action.moveEditorToNextGroup';
+        // The editor has just been shown; move it once the workbench settles, then let the
+        // host know the selection that follows is navigation, not a query.
+        setTimeout(() => {
+            void vscode.commands.executeCommand(command).then(
+                () => this.onFollowNavigate?.(),
+                () => undefined
+            );
+        }, 0);
     }
 
     /** Brings an already-open results tab to the front without moving keyboard focus. */
@@ -308,5 +344,6 @@ export class ResultsView implements vscode.Disposable {
         this.disposables.length = 0;
     }
 }
+
 
 

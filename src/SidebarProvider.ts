@@ -41,9 +41,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.updateViewDescription();
     }
 
+    /**
+     * Ignores editor prefills for a moment. Used when a navigation moved the caret — a
+     * follow link from the results tab selects the hit, and that selection is not a query.
+     */
+    public pausePrefill(ms: number): void {
+        this.suppressPrefillUntil = Math.max(this.suppressPrefillUntil, Date.now() + ms);
+    }
+
     /** Puts a compact status next to the view title, so the panel keeps that height. */
-    private updateViewDescription(): void {
-        if (!this._view) return;
+    private updateViewDescription(): void {        if (!this._view) return;
         const compact = this._statusText
             .replace(/^Ready\s*·\s*/i, '')
             .replace(/\s+/g, ' ')
