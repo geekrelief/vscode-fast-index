@@ -24,6 +24,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
     private prefillTimer?: ReturnType<typeof setTimeout>;
     private suppressPrefillUntil = 0;
+    /** Where the last Follow link landed, so that caret is not mistaken for a new query. */
+    private lastFollow?: { file: string; line: number; at: number };
+    /** Document URI last seen open as a real tab, so the auxiliary-editor check stays cheap. */
+    private knownTabEditorUri = '';
     /** Where the user last put the caret, so opening the panel can tell that from an open at 0,0. */
     private lastUserCursor?: { uri: string; line: number; character: number };
     private lockNoticed = false;
@@ -37,6 +41,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this._statusState = state;
         // The status lives in the view title bar, not in a row of its own.
         this.updateViewDescription();
+    }
+
+    /**
+     * A follow link just placed the caret at `file:line` (`line` < 0: anywhere in that file).
+     * Editor prefills pause, and the exact cursor the link left behind is ignored afterwards —
+     * taking the word under it would replace the query that produced the results.
+     */
+    public noteFollow(file: string, line: number): void {
+        this.suppressPrefillUntil = Math.max(this.suppressPrefillUntil, Date.now() + 1200);
+        this.lastFollow = { file, line, at: Date.now() };
     }
 
     /** Puts a compact status next to the view title, so the panel keeps that height. */
@@ -265,16 +279,58 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             vscode.window.onDidChangeActiveTextEditor(editor => {
                 // Switching editors is not a cursor move: only an explicit selection counts.
                 if (editor && !editor.selection.isEmpty) this.schedulePrefill();
+            }),
+            // Closing the results tab hands focus back to the editor it replaced, which fires
+            // a selection event with no user behind it. Without this pause the panel would
+            // immediately search for the word under that caret and reopen the tab it just lost.
+            vscode.window.tabGroups.onDidChangeTabs(event => {
+                const closedResults = event.closed.some(tab => {
+                    const input = tab.input;
+                    return input instanceof vscode.TabInputText
+                        && input.uri.scheme === 'fast-index-results';
+                });
+                if (!closedResults) return;
+                this.suppressPrefillUntil = Date.now() + 600;
+                log('results tab closed: editor prefills paused for 600ms');
             })
         );
+    }
+
+    /**
+     * True for editors that are navigation aids rather than the file being worked on: a peek
+     * widget, the output pane. A peek has no column and is not a tab. Following its cursor
+     * would search for whatever word it lands on and, with auto-open on, replace the results
+     * tab the user was reading.
+     */
+    private isAuxiliaryEditor(editor: vscode.TextEditor): boolean {
+        if (editor.viewColumn === undefined) return true;
+
+        const target = editor.document.uri.toString();
+        // Selection events fire on every keystroke; the tab scan is only needed once per editor.
+        if (target === this.knownTabEditorUri) return false;
+
+        const isTab = vscode.window.tabGroups.all.some(group => group.tabs.some(tab => {
+            const input = tab.input;
+            if (input instanceof vscode.TabInputText) return input.uri.toString() === target;
+            if (input instanceof vscode.TabInputTextDiff) {
+                return input.original.toString() === target || input.modified.toString() === target;
+            }
+            return false;
+        }));
+        if (isTab) this.knownTabEditorUri = target;
+        return !isTab;
     }
 
     /** Tracks where the user last clicked, so opening the panel can tell that from a file open. */
     private onEditorSelection(event: vscode.TextEditorSelectionChangeEvent): void {
         if (event.textEditor !== vscode.window.activeTextEditor) return;
-        // Opening a file parks the cursor at 0,0 and fires a "Command" selection
-        // change; only real pointer/keyboard moves may seed the search box.
-        if (event.kind === vscode.TextEditorSelectionChangeKind.Command) return;
+        if (this.isAuxiliaryEditor(event.textEditor)) return;
+        // Opening a file parks the cursor at 0,0 and fires a "Command" selection change, and
+        // restoring focus (closing a tab, leaving the panel) fires one with no kind at all.
+        // Only pointer and keyboard moves are the user pointing at a word.
+        const kind = event.kind;
+        if (kind !== vscode.TextEditorSelectionChangeKind.Mouse
+            && kind !== vscode.TextEditorSelectionChangeKind.Keyboard) return;
         const active = event.selections[0]?.active;
         if (active) {
             this.lastUserCursor = {
@@ -374,13 +430,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         return;
                     }
                     const generation = ++this.searchGeneration;
+                    const startedAt = Date.now();
                     const files = this.indexer.search(value, isRegex, { include, exclude });
-                    const snippets = await this.getSnippets(files, value, isMatchCase, isRegex, filter, () => generation !== this.searchGeneration);
+                    const indexMs = Date.now() - startedAt;
+                    const snippets = await this.getSnippets(
+                        files, value, isMatchCase, isRegex, filter,
+                        () => generation !== this.searchGeneration,
+                        rows => {
+                            if (generation !== this.searchGeneration) return;
+                            this.postToViews({ type: 'results', value: rows });
+                        });
                     if (generation !== this.searchGeneration) {
                         log(`search "${value}" superseded by a newer search`);
                         return;
                     }
-                    log(`search "${value}" reason=${reason || 'unknown'} case=${!!isMatchCase} regex=${!!isRegex} include=[${(include || []).join(',')}] exclude=[${(exclude || []).join(',')}] filter="${filter || ''}" -> ${files.length} files, ${snippets.length} rows`);
+                    log(`search "${value}" reason=${reason || 'unknown'} case=${!!isMatchCase} regex=${!!isRegex} include=[${(include || []).join(',')}] exclude=[${(exclude || []).join(',')}] filter="${filter || ''}" -> ${files.length} files, ${snippets.length} rows in ${Date.now() - startedAt} ms (index ${indexMs} ms)`);
                     this.lastSnapshot = { query: value, isRegex: !!isRegex, isMatchCase: !!isMatchCase, filter: filter || '', include: include || [], exclude: exclude || [], rows: snippets };
                     this.postToViews({ type: 'results', value: snippets });
                     this.onResults?.(this.lastSnapshot, 'search');
@@ -715,6 +779,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
         const editor = vscode.window.activeTextEditor;
         if (!editor) return;
+        if (this.isAuxiliaryEditor(editor)) return;
         // Never seed the query from our own generated views (output, settings, …). The
         // results editor counts too, unless the user opted into Auto Search from it.
         const scheme = editor.document.uri.scheme;
@@ -725,6 +790,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
         const document = editor.document;
         const selection = editor.selection;
+
+        // The caret a Follow link left behind is navigation, not a new term: taking the word
+        // under it would replace the query whose results the user is clicking through.
+        const followed = this.lastFollow;
+        if (followed && Date.now() - followed.at < 3000
+            && followed.file.toLowerCase() === document.uri.fsPath.toLowerCase()
+            && (followed.line < 0 || followed.line === selection.active.line)) {
+            log('prefill skipped: cursor is where a Follow link landed');
+            return;
+        }
         let text = '';
 
         if (!selection.isEmpty) {
@@ -847,7 +922,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private async getSnippets(files: string[], query: string, isMatchCase: boolean, isRegex: boolean, filter?: string, isStale?: () => boolean) {
+    private async getSnippets(files: string[], query: string, isMatchCase: boolean, isRegex: boolean, filter?: string, isStale?: () => boolean, onPartial?: (rows: any[]) => void) {
         const snippets: any[] = [];
         
         let flags = 'g';
@@ -882,6 +957,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         const perRoot = new Map<string, number>();
         const overflow: string[] = [];
         const concurrency = 20;
+        const startedAt = Date.now();
+        let filesRead = 0;
+        let bytesRead = 0;
+        // Our own work vs. wall clock: the difference is time the extension host spent elsewhere.
+        let readMs = 0;
+        let scanMs = 0;
+        // Progressive results: the first search after a window starts can spend seconds waiting
+        // on a saturated disk, so show what is already found instead of the whole list at once.
+        let lastPostAt = 0;
+        let lastPosted = 0;
 
         const readMatches = async (file: string): Promise<any[]> => {
             const fileResults: any[] = [];
@@ -892,8 +977,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             try {
                 // Prefer the live buffer: a replaced (but unsaved) document must match.
                 const openDocument = vscode.workspace.textDocuments.find(document => document.uri.fsPath === file);
+                const readStarted = Date.now();
                 const content = openDocument ? openDocument.getText() : await fs.promises.readFile(file, 'utf-8');
+                readMs += Date.now() - readStarted;
                 readOk = true;
+                filesRead++;
+                bytesRead += content.length;
+                const scanStarted = Date.now();
                 searchRegex.lastIndex = 0;
                 let match;
 
@@ -933,6 +1023,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         nameMatch
                     });
                 }
+                scanMs += Date.now() - scanStarted;
             } catch (e) { }
             // A file named after the query is a hit even if no line mentions it.
             if (readOk && fileResults.length === 0 && !isRegex && fileNameRank(file, query) <= 2
@@ -953,7 +1044,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         // files whose folder had already used up its share.
         for (let pass = 0; pass < 2 && snippets.length < maxResults; pass++) {
             const list = pass === 0 ? files : overflow;
-            for (let i = 0; i < list.length && snippets.length < maxResults; i += concurrency) {
+            // Stop once the results plus deferred files can fill the list. Without the
+            // second bound, one root with no matches makes pass 0 read every candidate.
+            for (let i = 0; i < list.length && snippets.length < maxResults
+                && snippets.length + overflow.length < maxResults; i += concurrency) {
                 if (isStale?.()) return [];   // a newer search took over: stop reading files
                 const batch = list.slice(i, i + concurrency);
                 const reads = await Promise.all(batch.map(readMatches));
@@ -976,10 +1070,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     perRoot.set(root, used + take.length);
                     snippets.push(...take);
                 }
+
+                // Show what has been found so far; the tree and results tab still get the
+                // finished list only, because they re-render everything they are given.
+                if (onPartial && snippets.length > lastPosted && Date.now() - lastPostAt >= 150) {
+                    lastPostAt = Date.now();
+                    lastPosted = snippets.length;
+                    onPartial(snippets.slice(0, maxResults));
+                }
             }
             if (overflow.length === 0) break;
         }
 
+        log(`snippets "${query}" -> ${snippets.length} rows from ${filesRead} files ` +
+            `(${(bytesRead / 1048576).toFixed(1)} MB) in ${Date.now() - startedAt} ms ` +
+            `(read ${readMs} ms, scan ${scanMs} ms)`);
         return snippets.slice(0, maxResults);
     }
 
@@ -2371,3 +2476,10 @@ vscode.postMessage({ type: 'getCaches' });
         `;
     }
 }
+
+
+
+
+
+
+

@@ -4,7 +4,9 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as zlib from 'zlib';
 import * as crypto from 'crypto';
-import { computeTrigrams } from './trigrams';
+import { computeTrigrams, queryTrigrams } from './trigrams';
+import { log } from './log';
+import { BATCH_WINDOW } from './protocol';
 
 export interface CacheLoadResult {
     status: 'loaded' | 'partial' | 'missing';
@@ -54,11 +56,14 @@ export interface CacheEntry {
  * load time, only the small tables are read. Posting lists are decoded on demand
  * for the handful of trigrams a query actually needs.
  */
-const SEGMENT_MAGIC = 'VFI4';
-const SEGMENT_VERSION = 4;
-const LEGACY_SEGMENT_MAGIC = 'VFI3';
+const SEGMENT_MAGIC = 'VFI5';
+const SEGMENT_VERSION = 5;
+/** VFI4 and older stored word-split trigrams, which cannot answer whole-text queries. */
+const STALE_SEGMENT_MAGICS = ['VFI4', 'VFI3'];
 const LEGACY_JSON_FILE = 'fast-index-cache.json';
 const EMPTY_POSTINGS = new Uint32Array(0);
+/** Terms per segment addressable by the packed (segment, local) id above. */
+const TERMS_PER_SEGMENT = 0x100000;
 const DECODE_CACHE_LIMIT = 2048;
 
 function normalizePath(p: string): string {
@@ -308,8 +313,8 @@ interface Segment {
 interface RootInfo {
     path: string;
     cacheFile: string;
-    /** Segment written by 0.1.x, migrated on first load. */
-    legacyFile: string;
+    /** Segments in the old word-split format: deleted, never read. */
+    staleFiles: string[];
 }
 
 interface BuildPlan {
@@ -329,7 +334,7 @@ export class ProjectIndexer {
 
     private trigrams: string[] = [];
     private trigramIdOf = new Map<string, number>();
-    /** global trigram id -> packed (segmentIndex * 65536 + local trigram id) */
+    /** global trigram id -> packed (segmentIndex * TERMS_PER_SEGMENT + local term id) */
     private sources: (number[] | undefined)[] = [];
     private segments: Segment[] = [];
 
@@ -348,6 +353,8 @@ export class ProjectIndexer {
     private journalPending = new Map<number, string[]>();
     private journalTimers = new Map<number, ReturnType<typeof setTimeout>>();
     private worker: Worker;
+    /** Results applied since the worker was last acknowledged. */
+    private ackWindow = 0;
 
     constructor(workspaceStorage: vscode.Uri | undefined, globalStorage: vscode.Uri | undefined) {
         const storage = globalStorage ?? workspaceStorage;
@@ -380,6 +387,11 @@ export class ProjectIndexer {
                         this.queueJournal(rootIndex, JSON.stringify({ p: msg.filePath, t: msg.trigrams, m: mtime, s: size }) + '\n');
                     }
                 }
+                // Applied: let the worker produce the next window.
+                if (msg.type === 'fileDone' && ++this.ackWindow >= BATCH_WINDOW) {
+                    this.ackWindow = 0;
+                    this.worker.postMessage({ type: 'ack' });
+                }
             }
         });
     }
@@ -392,10 +404,13 @@ export class ProjectIndexer {
             if (seen.has(key)) continue;
             seen.add(key);
             const hash = crypto.createHash('sha1').update(key).digest('hex').slice(0, 20);
+            const dir = this.segmentDir;
             this.roots.push({
                 path: rootPath,
-                cacheFile: this.segmentDir ? path.join(this.segmentDir, `root-${hash}.v4.bin`) : '',
-                legacyFile: this.segmentDir ? path.join(this.segmentDir, `root-${hash}.v3.bin`) : '',
+                cacheFile: dir ? path.join(dir, `root-${hash}.v5.bin`) : '',
+                staleFiles: dir
+                    ? ['.v4.bin', '.v3.bin'].map(suffix => path.join(dir, `root-${hash}${suffix}`))
+                    : [],
             });
         }
     }
@@ -472,6 +487,7 @@ export class ProjectIndexer {
 
     private addFile(filePath: string, trigrams: string[], mtime: number, size: number): void {
         let fileId = this.fileIdOf.get(filePath);
+        const isNewFile = fileId === undefined;
         if (fileId === undefined) {
             const rootIndex = this.rootIndexFor(filePath);
             if (rootIndex < 0) return; // outside every workspace folder
@@ -481,11 +497,14 @@ export class ProjectIndexer {
             this.fileSizes[fileId] = size;
         }
 
-        const current = new Set<number>();
+        const current = isNewFile ? undefined : new Set<number>();
         for (const trigram of trigrams) {
             const trigramId = this.trigramIdFor(trigram);
-            current.add(trigramId);
-            if (contains(this.postingsFor(trigramId), fileId)) continue;
+            current?.add(trigramId);
+            // A new file's id is larger than every id already in the index, so no posting
+            // list can hold it. Skipping the check keeps a fresh build linear instead of
+            // decoding (and re-decoding) a list per term, which is what made it quadratic.
+            if (!isNewFile && contains(this.postingsFor(trigramId), fileId)) continue;
 
             let extra = this.overlay.get(trigramId);
             if (!extra) {
@@ -495,7 +514,9 @@ export class ProjectIndexer {
             insertSorted(extra, fileId);
             this.decoded.delete(trigramId);
         }
-        this.dirty.set(fileId, current);
+        // Only a re-indexed file can leave stale postings behind; a new id has none, so
+        // tracking its term set would just cost ~40 KB per file for no benefit.
+        if (current) this.dirty.set(fileId, current);
     }
 
     // ---- postings access ---------------------------------------------------------
@@ -530,8 +551,9 @@ export class ProjectIndexer {
     }
 
     private decodeEntry(packed: number): Uint32Array {
-        const segment = this.segments[(packed / 65536) | 0];
-        const local = packed & 0xffff;
+        const segmentIndex = (packed / TERMS_PER_SEGMENT) | 0;
+        const segment = this.segments[segmentIndex];
+        const local = packed - segmentIndex * TERMS_PER_SEGMENT;
         const count = segment.counts[local];
         const out = new Uint32Array(count);
         const buffer = segment.buffer;
@@ -557,6 +579,7 @@ export class ProjectIndexer {
     // ---- loading -----------------------------------------------------------------
 
     public async loadFromDisk(): Promise<CacheLoadResult> {
+        const started = Date.now();
         this.onProgress?.('Loading index…');
 
         const missingRoots: string[] = [];
@@ -588,7 +611,9 @@ export class ProjectIndexer {
             : (loaded > 0 ? 'partial' : 'missing');
 
         if (loaded > 0) {
-            this.onProgress?.(`Loaded ${this.fileIdOf.size.toLocaleString()} files`, false);
+            const summary = `${this.fileIdOf.size.toLocaleString()} files · ${this.trigrams.length.toLocaleString()} terms`;
+            this.onProgress?.(`Ready · ${summary}`, false);
+            log(`loaded ${summary} · ${(bytes / 1048576).toFixed(1)} MB in ${Date.now() - started} ms`);
         }
 
         return { status, fileCount: this.fileIdOf.size, bytes, missingRoots, corruptRoots };
@@ -611,13 +636,11 @@ export class ProjectIndexer {
     }
 
     private async loadSegment(root: RootInfo, rootIndex: number): Promise<{ status: string; bytes: number }> {
-        let source = root.cacheFile;
+        const source = root.cacheFile;
         if (!source || !fs.existsSync(source)) {
-            if (root.legacyFile && fs.existsSync(root.legacyFile)) {
-                source = root.legacyFile;
-            } else {
-                return { status: 'missing', bytes: 0 };
-            }
+            // A segment in the old word-split format cannot answer whole-text queries.
+            await this.dropStaleSegments(root);
+            return { status: 'missing', bytes: 0 };
         }
 
         let raw: Buffer;
@@ -633,18 +656,11 @@ export class ProjectIndexer {
             });
 
             const magic = buffer.toString('ascii', 0, 4);
-            if (magic === LEGACY_SEGMENT_MAGIC) {
-                // One-time upgrade from the eager format: rewrite as VFI4, then read that.
-                await this.migrateLegacySegment(root, buffer);
-                // Carry pending edits over so they are not lost in the conversion.
-                const legacyJournal = `${source}.journal`;
-                if (fs.existsSync(legacyJournal) && !fs.existsSync(`${root.cacheFile}.journal`)) {
-                    await fs.promises.rename(legacyJournal, `${root.cacheFile}.journal`).catch(() => undefined);
-                }
-                await fs.promises.unlink(source).catch(() => undefined);
-                return this.loadSegment(root, rootIndex);
-            }
             if (buffer.length < 28 || magic !== SEGMENT_MAGIC) {
+                if (STALE_SEGMENT_MAGICS.includes(magic)) {
+                    await fs.promises.unlink(source).catch(() => undefined);
+                    return { status: 'missing', bytes: 0 };
+                }
                 return { status: 'corrupt', bytes: raw.length };
             }
             if (buffer.readUInt32LE(4) !== SEGMENT_VERSION) {
@@ -696,7 +712,7 @@ export class ProjectIndexer {
                     list = [];
                     this.sources[trigramId] = list;
                 }
-                list.push(segmentIndex * 65536 + t);
+                list.push(segmentIndex * TERMS_PER_SEGMENT + t);
                 // A later segment extends this trigram's postings: drop any cached decode.
                 // (Journal replay runs between segment loads, so the cache can be warm already.)
                 this.decoded.delete(trigramId);
@@ -709,61 +725,20 @@ export class ProjectIndexer {
         }
     }
 
-    /** Converts a VFI3 segment (eager, no index table, no mtimes) into VFI4. */
-    private async migrateLegacySegment(root: RootInfo, buffer: Buffer): Promise<void> {
-        const fileCount = buffer.readUInt32LE(8);
-        const trigramCount = buffer.readUInt32LE(12);
-        let offset = 20;
-        const rootLen = buffer.readUInt32LE(16);
-        offset += rootLen + 8;
-
-        const paths: string[] = new Array(fileCount);
-        for (let i = 0; i < fileCount; i++) {
-            const len = buffer.readUInt32LE(offset);
-            offset += 4;
-            paths[i] = buffer.toString('utf8', offset, offset + len);
-            offset += len;
-        }
-
-        const trigramBase = offset;
-        offset += trigramCount * 3;
-        offset = (offset + 3) & ~3;
-
-        const names: string[] = new Array(trigramCount);
-        const postings: Uint32Array[] = new Array(trigramCount);
-        for (let t = 0; t < trigramCount; t++) {
-            const base = trigramBase + t * 3;
-            names[t] = buffer.toString('ascii', base, base + 3);
-            const count = buffer.readUInt32LE(offset);
-            offset += 4;
-            const ids = new Uint32Array(count);
-            let fileId = 0;
-            for (let k = 0; k < count; k++) {
-                let byte = buffer[offset++];
-                let delta = byte & 0x7f;
-                let shift = 7;
-                while ((byte & 0x80) !== 0) {
-                    byte = buffer[offset++];
-                    delta |= (byte & 0x7f) << shift;
-                    shift += 7;
-                }
-                fileId += delta;
-                ids[k] = fileId;
+    /** Removes segments this build cannot read, plus their journals. */
+    private async dropStaleSegments(root: RootInfo): Promise<void> {
+        for (const file of root.staleFiles) {
+            try {
+                await fs.promises.unlink(file);
+            } catch {
+                /* nothing to drop */
             }
-            postings[t] = ids;
+            try {
+                await fs.promises.unlink(`${file}.journal`);
+            } catch {
+                /* nothing to drop */
+            }
         }
-
-        const mtimes = new Float64Array(fileCount);
-        const sizes = new Uint32Array(fileCount);
-        await writeSegmentFile(
-            root.cacheFile,
-            root.path,
-            paths,
-            mtimes,
-            sizes,
-            names,
-            (i) => postings[i]
-        );
     }
 
     // ---- saving ------------------------------------------------------------------
@@ -1004,7 +979,8 @@ export class ProjectIndexer {
                                 processed += count;
                                 progress.report({
                                     increment: (100 * count) / total,
-                                    message: `Processed ${processed.toLocaleString()} of ${total.toLocaleString()}`
+                                    message: `Processed ${processed.toLocaleString()} of ${total.toLocaleString()}` +
+                                        ` · ${this.trigrams.length.toLocaleString()} terms`
                                 });
                             }
                         );
@@ -1024,21 +1000,25 @@ export class ProjectIndexer {
                     }
 
                     const needsSave = force || changed > 0 || removed > 0 || this.overlay.size > 0;
+                    let savedBytes = 0;
                     if (needsSave) {
                         this.onProgress?.(`Saving ${selected.length} folder${selected.length === 1 ? '' : 's'}…`);
                         progress.report({ message: 'Saving index…' });
-                        await this.saveToDisk(selected);
+                        savedBytes = await this.saveToDisk(selected);
                         // Reload so the in-memory index matches the file exactly.
                         await this.reloadAll();
                     }
 
-                    this.onProgress?.(`Ready · ${this.fileIdOf.size.toLocaleString()} files`, false);
+                    const summary = `${this.fileIdOf.size.toLocaleString()} files · ${this.trigrams.length.toLocaleString()} terms`;
+                    this.onProgress?.(`Ready · ${summary}`, false);
                     const note = skipped > 0 ? `, ${skipped.toLocaleString()} unchanged` : '';
+                    log(`indexed ${summary}${savedBytes > 0 ? ` · ${(savedBytes / 1048576).toFixed(1)} MB on disk` : ''}` +
+                        (changed > 0 ? ` · ${changed.toLocaleString()} updated` : '') + note);
                     if (!needsSave) {
-                        vscode.window.showInformationMessage(`Fast Index: already up to date (${this.fileIdOf.size.toLocaleString()} files${note}).`);
+                        vscode.window.showInformationMessage(`Fast Index: already up to date (${this.fileIdOf.size.toLocaleString()} files, ${this.trigrams.length.toLocaleString()} terms${note}).`);
                     } else {
                         vscode.window.showInformationMessage(
-                            `Fast Index ready: ${this.fileIdOf.size.toLocaleString()} files, ${this.trigrams.length.toLocaleString()} trigrams` +
+                            `Fast Index ready: ${this.fileIdOf.size.toLocaleString()} files, ${this.trigrams.length.toLocaleString()} terms` +
                             (changed > 0 ? `, ${changed.toLocaleString()} updated` : '') + note + '.'
                         );
                     }
@@ -1085,6 +1065,8 @@ export class ProjectIndexer {
             };
             this.worker.on('message', onMessage);
             this.worker.on('error', onError);
+            // The worker counts its own window from zero for every batch.
+            this.ackWindow = 0;
             this.worker.postMessage({
                 type: 'processBatch',
                 paths: plan.paths,
@@ -1175,17 +1157,15 @@ export class ProjectIndexer {
         const lowerQuery = query.toLowerCase();
 
         const queryTrigramIds: number[] = [];
-        const words = lowerQuery.split(/\W+/).filter(w => w.length >= 3);
-        let expectedTrigrams = 0;
-        for (const word of words) {
-            for (let i = 0; i <= word.length - 3; i++) {
-                expectedTrigrams++;
-                const id = this.trigramIdOf.get(word.substring(i, i + 3));
-                if (id !== undefined) queryTrigramIds.push(id);
-            }
+        // Same windows the index stored for a file, so a phrase prunes as a phrase.
+        const trigrams = queryTrigrams(lowerQuery);
+        const expectedTrigrams = trigrams.length;
+        for (const trigram of trigrams) {
+            const id = this.trigramIdOf.get(trigram);
+            if (id !== undefined) queryTrigramIds.push(id);
         }
 
-        // Special-character-only queries (e.g. "$$$" or "()=>") cannot be pruned.
+        // Queries too short (or too non-ASCII) to have a single window cannot be pruned.
         if (expectedTrigrams === 0) {
             return rankByFileName(this.allIndexedFiles(allow), lowerQuery);
         }
@@ -1274,7 +1254,7 @@ export class ProjectIndexer {
         if (!this.segmentDir) return [];
         let names: string[];
         try {
-            names = (await fs.promises.readdir(this.segmentDir)).filter(name => name.startsWith('root-') && /\.v[34]\.bin$/.test(name));
+            names = (await fs.promises.readdir(this.segmentDir)).filter(name => name.startsWith('root-') && /\.v[345]\.bin$/.test(name));
         } catch {
             return [];
         }
@@ -1365,7 +1345,7 @@ async function readSegmentHeader(file: string): Promise<{ root: string; builtAt:
 
         if (inflated.length < 28) return null;
         const magic = inflated.toString('ascii', 0, 4);
-        if (magic !== SEGMENT_MAGIC && magic !== LEGACY_SEGMENT_MAGIC) return null;
+        if (magic !== SEGMENT_MAGIC && !STALE_SEGMENT_MAGICS.includes(magic)) return null;
         const rootLen = inflated.readUInt32LE(16);
         if (inflated.length < 20 + rootLen + 8) return null;
         return {
@@ -1489,3 +1469,5 @@ async function writeSegmentFile(
     await fs.promises.rename(tmp, file);
     return compressed.length;
 }
+
+

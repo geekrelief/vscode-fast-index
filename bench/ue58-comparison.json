@@ -1,0 +1,866 @@
+{
+  "verified": 397,
+  "violations": 0,
+  "rows": [
+    {
+      "query": "GetActorLocation",
+      "cat": "identifier",
+      "base": {
+        "all": false,
+        "candidates": 1599,
+        "readMB": 4.4649858474731445,
+        "readFiles": 96,
+        "postings": 902386,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 1599,
+        "readMB": 4.4649858474731445,
+        "readFiles": 96,
+        "postings": 902402,
+        "filled": true
+      }
+    },
+    {
+      "query": "FVector::ZeroVector",
+      "cat": "identifier",
+      "base": {
+        "all": false,
+        "candidates": 4031,
+        "readMB": 1.653151512145996,
+        "readFiles": 93,
+        "postings": 744878,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 2525,
+        "readMB": 0.5808000564575195,
+        "readFiles": 43,
+        "postings": 806537,
+        "filled": true
+      }
+    },
+    {
+      "query": "bUseControllerRotationYaw",
+      "cat": "identifier",
+      "base": {
+        "all": false,
+        "candidates": 23,
+        "readMB": 1.992487907409668,
+        "readFiles": 23,
+        "postings": 1150137,
+        "filled": false
+      },
+      "cand": {
+        "all": false,
+        "candidates": 23,
+        "readMB": 1.992487907409668,
+        "readFiles": 23,
+        "postings": 1150163,
+        "filled": false
+      }
+    },
+    {
+      "query": "LineTraceSingleByChannel",
+      "cat": "identifier",
+      "base": {
+        "all": false,
+        "candidates": 90,
+        "readMB": 5.4856977462768555,
+        "readFiles": 68,
+        "postings": 973200,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 90,
+        "readMB": 5.4856977462768555,
+        "readFiles": 68,
+        "postings": 973208,
+        "filled": true
+      }
+    },
+    {
+      "query": "CreateDefaultSubobject",
+      "cat": "identifier",
+      "base": {
+        "all": false,
+        "candidates": 829,
+        "readMB": 0.9279317855834961,
+        "readFiles": 26,
+        "postings": 1127523,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 829,
+        "readMB": 0.9279317855834961,
+        "readFiles": 26,
+        "postings": 1127531,
+        "filled": true
+      }
+    },
+    {
+      "query": "TWeakObjectPtr",
+      "cat": "identifier",
+      "base": {
+        "all": false,
+        "candidates": 6232,
+        "readMB": 0.18137550354003906,
+        "readFiles": 31,
+        "postings": 462092,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 6232,
+        "readMB": 0.18137550354003906,
+        "readFiles": 31,
+        "postings": 462092,
+        "filled": true
+      }
+    },
+    {
+      "query": "GetTimerManager",
+      "cat": "identifier",
+      "base": {
+        "all": false,
+        "candidates": 2800,
+        "readMB": 7.859350204467773,
+        "readFiles": 208,
+        "postings": 558611,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 2800,
+        "readMB": 7.859350204467773,
+        "readFiles": 208,
+        "postings": 558625,
+        "filled": true
+      }
+    },
+    {
+      "query": "FString::Printf",
+      "cat": "identifier",
+      "base": {
+        "all": false,
+        "candidates": 7582,
+        "readMB": 1.4438400268554688,
+        "readFiles": 53,
+        "postings": 676064,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 5529,
+        "readMB": 0.8171358108520508,
+        "readFiles": 38,
+        "postings": 749313,
+        "filled": true
+      }
+    },
+    {
+      "query": "draw",
+      "cat": "word",
+      "base": {
+        "all": false,
+        "candidates": 10134,
+        "readMB": 0.39684200286865234,
+        "readFiles": 18,
+        "postings": 34341,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 10136,
+        "readMB": 0.39684200286865234,
+        "readFiles": 18,
+        "postings": 34345,
+        "filled": true
+      }
+    },
+    {
+      "query": "mesh",
+      "cat": "word",
+      "base": {
+        "all": false,
+        "candidates": 30575,
+        "readMB": 0.4623689651489258,
+        "readFiles": 17,
+        "postings": 153645,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 30575,
+        "readMB": 0.4623689651489258,
+        "readFiles": 17,
+        "postings": 153645,
+        "filled": true
+      }
+    },
+    {
+      "query": "actor",
+      "cat": "word",
+      "base": {
+        "all": false,
+        "candidates": 38863,
+        "readMB": 0.6702365875244141,
+        "readFiles": 17,
+        "postings": 211013,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 38865,
+        "readMB": 0.6702365875244141,
+        "readFiles": 17,
+        "postings": 211015,
+        "filled": true
+      }
+    },
+    {
+      "query": "cast",
+      "cat": "word",
+      "base": {
+        "all": false,
+        "candidates": 36599,
+        "readMB": 0.09845924377441406,
+        "readFiles": 17,
+        "postings": 93710,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 36599,
+        "readMB": 0.09845924377441406,
+        "readFiles": 17,
+        "postings": 93710,
+        "filled": true
+      }
+    },
+    {
+      "query": "text",
+      "cat": "word",
+      "base": {
+        "all": false,
+        "candidates": 64391,
+        "readMB": 0.17346858978271484,
+        "readFiles": 18,
+        "postings": 148973,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 64393,
+        "readMB": 0.17346858978271484,
+        "readFiles": 18,
+        "postings": 148977,
+        "filled": true
+      }
+    },
+    {
+      "query": "world",
+      "cat": "word",
+      "base": {
+        "all": false,
+        "candidates": 12945,
+        "readMB": 0.6628923416137695,
+        "readFiles": 23,
+        "postings": 68967,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 12947,
+        "readMB": 0.6628923416137695,
+        "readFiles": 23,
+        "postings": 68973,
+        "filled": true
+      }
+    },
+    {
+      "query": "void",
+      "cat": "word",
+      "base": {
+        "all": false,
+        "candidates": 85706,
+        "readMB": 0.02929401397705078,
+        "readFiles": 17,
+        "postings": 172950,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 85706,
+        "readMB": 0.02929401397705078,
+        "readFiles": 17,
+        "postings": 172950,
+        "filled": true
+      }
+    },
+    {
+      "query": "for (int",
+      "cat": "phrase",
+      "base": {
+        "all": false,
+        "candidates": 82043,
+        "readMB": 30.75630283355713,
+        "readFiles": 1158,
+        "postings": 200314,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 21148,
+        "readMB": 3.49606990814209,
+        "readFiles": 136,
+        "postings": 420184,
+        "filled": true
+      }
+    },
+    {
+      "query": "return false",
+      "cat": "phrase",
+      "base": {
+        "all": false,
+        "candidates": 44378,
+        "readMB": 7.712160110473633,
+        "readFiles": 133,
+        "postings": 535130,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 32023,
+        "readMB": 4.741790771484375,
+        "readFiles": 70,
+        "postings": 733220,
+        "filled": true
+      }
+    },
+    {
+      "query": "return nullptr;",
+      "cat": "phrase",
+      "base": {
+        "all": false,
+        "candidates": 29834,
+        "readMB": 5.274693489074707,
+        "readFiles": 144,
+        "postings": 571966,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 12903,
+        "readMB": 0.8681020736694336,
+        "readFiles": 46,
+        "postings": 759867,
+        "filled": true
+      }
+    },
+    {
+      "query": "static_cast<",
+      "cat": "phrase",
+      "base": {
+        "all": false,
+        "candidates": 14498,
+        "readMB": 3.651092529296875,
+        "readFiles": 28,
+        "postings": 527698,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 14070,
+        "readMB": 0.6115646362304688,
+        "readFiles": 20,
+        "postings": 552990,
+        "filled": true
+      }
+    },
+    {
+      "query": "const FVector&",
+      "cat": "phrase",
+      "base": {
+        "all": false,
+        "candidates": 14353,
+        "readMB": 0.6367168426513672,
+        "readFiles": 61,
+        "postings": 638318,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 4341,
+        "readMB": 0.18099498748779297,
+        "readFiles": 23,
+        "postings": 856141,
+        "filled": true
+      }
+    },
+    {
+      "query": "namespace UE",
+      "cat": "phrase",
+      "base": {
+        "all": false,
+        "candidates": 69551,
+        "readMB": 14.758989334106445,
+        "readFiles": 738,
+        "postings": 690033,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 26378,
+        "readMB": 0.6575593948364258,
+        "readFiles": 37,
+        "postings": 892840,
+        "filled": true
+      }
+    },
+    {
+      "query": ") const",
+      "cat": "phrase",
+      "base": {
+        "all": false,
+        "candidates": 103479,
+        "readMB": 17.129558563232422,
+        "readFiles": 318,
+        "postings": 337841,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 62902,
+        "readMB": 3.2395248413085938,
+        "readFiles": 43,
+        "postings": 532303,
+        "filled": true
+      }
+    },
+    {
+      "query": "if (",
+      "cat": "phrase",
+      "base": {
+        "all": true,
+        "candidates": 137016,
+        "readMB": 13.355829238891602,
+        "readFiles": 574,
+        "postings": 0,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 49150,
+        "readMB": 0.4011955261230469,
+        "readFiles": 21,
+        "postings": 139100,
+        "filled": true
+      }
+    },
+    {
+      "query": "UPROPERTY(EditAnywhere",
+      "cat": "symbol",
+      "base": {
+        "all": false,
+        "candidates": 6005,
+        "readMB": 0.06868553161621094,
+        "readFiles": 20,
+        "postings": 853713,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 5114,
+        "readMB": 0.06868553161621094,
+        "readFiles": 20,
+        "postings": 909322,
+        "filled": true
+      }
+    },
+    {
+      "query": "GENERATED_BODY()",
+      "cat": "symbol",
+      "base": {
+        "all": false,
+        "candidates": 12063,
+        "readMB": 0.09485435485839844,
+        "readFiles": 46,
+        "postings": 699281,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 11976,
+        "readMB": 0.09485435485839844,
+        "readFiles": 46,
+        "postings": 761560,
+        "filled": true
+      }
+    },
+    {
+      "query": "#include \"",
+      "cat": "symbol",
+      "base": {
+        "all": false,
+        "candidates": 121177,
+        "readMB": 4.463163375854492,
+        "readFiles": 193,
+        "postings": 616489,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 99057,
+        "readMB": 0.023156166076660156,
+        "readFiles": 22,
+        "postings": 955657,
+        "filled": true
+      }
+    },
+    {
+      "query": "TArray<",
+      "cat": "symbol",
+      "base": {
+        "all": false,
+        "candidates": 42842,
+        "readMB": 7.382367134094238,
+        "readFiles": 75,
+        "postings": 226474,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 36065,
+        "readMB": 0.13251876831054688,
+        "readFiles": 30,
+        "postings": 263790,
+        "filled": true
+      }
+    },
+    {
+      "query": "UE_LOG(LogTemp",
+      "cat": "symbol",
+      "base": {
+        "all": false,
+        "candidates": 610,
+        "readMB": 16.363798141479492,
+        "readFiles": 384,
+        "postings": 275251,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 101,
+        "readMB": 3.9905338287353516,
+        "readFiles": 58,
+        "postings": 302278,
+        "filled": true
+      }
+    },
+    {
+      "query": "TEXT(",
+      "cat": "symbol",
+      "base": {
+        "all": false,
+        "candidates": 64391,
+        "readMB": 11.17505168914795,
+        "readFiles": 282,
+        "postings": 148973,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 35826,
+        "readMB": 0.8400564193725586,
+        "readFiles": 29,
+        "postings": 185319,
+        "filled": true
+      }
+    },
+    {
+      "query": "->",
+      "cat": "symbol",
+      "base": {
+        "all": true,
+        "candidates": 137016,
+        "readMB": 8.202507019042969,
+        "readFiles": 370,
+        "postings": 0,
+        "filled": true
+      },
+      "cand": {
+        "all": true,
+        "candidates": 137016,
+        "readMB": 8.202507019042969,
+        "readFiles": 370,
+        "postings": 0,
+        "filled": true
+      }
+    },
+    {
+      "query": "::",
+      "cat": "symbol",
+      "base": {
+        "all": true,
+        "candidates": 137016,
+        "readMB": 7.612149238586426,
+        "readFiles": 306,
+        "postings": 0,
+        "filled": true
+      },
+      "cand": {
+        "all": true,
+        "candidates": 137016,
+        "readMB": 7.612149238586426,
+        "readFiles": 306,
+        "postings": 0,
+        "filled": true
+      }
+    },
+    {
+      "query": "//",
+      "cat": "symbol",
+      "base": {
+        "all": true,
+        "candidates": 137016,
+        "readMB": 2.617158889770508,
+        "readFiles": 33,
+        "postings": 0,
+        "filled": true
+      },
+      "cand": {
+        "all": true,
+        "candidates": 137016,
+        "readMB": 2.617158889770508,
+        "readFiles": 33,
+        "postings": 0,
+        "filled": true
+      }
+    },
+    {
+      "query": "&&",
+      "cat": "symbol",
+      "base": {
+        "all": true,
+        "candidates": 137016,
+        "readMB": 13.881827354431152,
+        "readFiles": 619,
+        "postings": 0,
+        "filled": true
+      },
+      "cand": {
+        "all": true,
+        "candidates": 137016,
+        "readMB": 13.881827354431152,
+        "readFiles": 619,
+        "postings": 0,
+        "filled": true
+      }
+    },
+    {
+      "query": "}}",
+      "cat": "symbol",
+      "base": {
+        "all": true,
+        "candidates": 137016,
+        "readMB": 20.895833015441895,
+        "readFiles": 702,
+        "postings": 0,
+        "filled": true
+      },
+      "cand": {
+        "all": true,
+        "candidates": 137016,
+        "readMB": 20.895833015441895,
+        "readFiles": 702,
+        "postings": 0,
+        "filled": true
+      }
+    },
+    {
+      "query": "##",
+      "cat": "symbol",
+      "base": {
+        "all": true,
+        "candidates": 137016,
+        "readMB": 21.799543380737305,
+        "readFiles": 777,
+        "postings": 0,
+        "filled": true
+      },
+      "cand": {
+        "all": true,
+        "candidates": 137016,
+        "readMB": 21.799543380737305,
+        "readFiles": 777,
+        "postings": 0,
+        "filled": true
+      }
+    },
+    {
+      "query": "###",
+      "cat": "symbol",
+      "base": {
+        "all": true,
+        "candidates": 137016,
+        "readMB": 157.1540126800537,
+        "readFiles": 19981,
+        "postings": 0,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 374,
+        "readMB": 0.8523693084716797,
+        "readFiles": 22,
+        "postings": 374,
+        "filled": true
+      }
+    },
+    {
+      "query": "})",
+      "cat": "symbol",
+      "base": {
+        "all": true,
+        "candidates": 137016,
+        "readMB": 21.882134437561035,
+        "readFiles": 781,
+        "postings": 0,
+        "filled": true
+      },
+      "cand": {
+        "all": true,
+        "candidates": 137016,
+        "readMB": 21.882134437561035,
+        "readFiles": 781,
+        "postings": 0,
+        "filled": true
+      }
+    },
+    {
+      "query": "FVector>",
+      "cat": "symbol",
+      "base": {
+        "all": false,
+        "candidates": 14618,
+        "readMB": 2.430750846862793,
+        "readFiles": 270,
+        "postings": 300477,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 4190,
+        "readMB": 0.7695131301879883,
+        "readFiles": 63,
+        "postings": 317708,
+        "filled": true
+      }
+    },
+    {
+      "query": "Actor.h",
+      "cat": "filename",
+      "base": {
+        "all": false,
+        "candidates": 38863,
+        "readMB": 0.40079307556152344,
+        "readFiles": 38,
+        "postings": 211013,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 13361,
+        "readMB": 0.40079307556152344,
+        "readFiles": 38,
+        "postings": 296881,
+        "filled": true
+      }
+    },
+    {
+      "query": "GameMode.cpp",
+      "cat": "filename",
+      "base": {
+        "all": false,
+        "candidates": 2381,
+        "readMB": 145.08645820617676,
+        "readFiles": 2398,
+        "postings": 432109,
+        "filled": false
+      },
+      "cand": {
+        "all": false,
+        "candidates": 283,
+        "readMB": 37.05380058288574,
+        "readFiles": 303,
+        "postings": 463359,
+        "filled": false
+      }
+    },
+    {
+      "query": "CoreMinimal.h",
+      "cat": "filename",
+      "base": {
+        "all": false,
+        "candidates": 16418,
+        "readMB": 0.3902397155761719,
+        "readFiles": 54,
+        "postings": 440990,
+        "filled": true
+      },
+      "cand": {
+        "all": false,
+        "candidates": 15647,
+        "readMB": 0.0943603515625,
+        "readFiles": 51,
+        "postings": 500114,
+        "filled": true
+      }
+    },
+    {
+      "query": "LogTemp.*Warning",
+      "cat": "regex",
+      "base": {
+        "all": false,
+        "candidates": 525,
+        "readMB": 31.08364486694336,
+        "readFiles": 525,
+        "postings": 423580,
+        "filled": false
+      },
+      "cand": {
+        "all": false,
+        "candidates": 0,
+        "readMB": 0,
+        "readFiles": 0,
+        "postings": 426104,
+        "filled": false
+      }
+    },
+    {
+      "query": "UCLASS\\(.*\\)",
+      "cat": "regex",
+      "base": {
+        "all": false,
+        "candidates": 16798,
+        "readMB": 183.953782081604,
+        "readFiles": 16798,
+        "postings": 294061,
+        "filled": false
+      },
+      "cand": {
+        "all": false,
+        "candidates": 0,
+        "readMB": 0,
+        "readFiles": 0,
+        "postings": 294446,
+        "filled": false
+      }
+    }
+  ]
+}

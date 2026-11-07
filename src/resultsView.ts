@@ -1,4 +1,6 @@
+import * as fs from 'fs';
 import * as vscode from 'vscode';
+import { log } from './log';
 import {
     ResultRow,
     ResultsDocumentProvider,
@@ -11,7 +13,7 @@ import {
 } from './ResultsDocumentProvider';
 
 /** The language VS Code's own `search-result` extension owns. */
-const SEARCH_RESULT_LANGUAGE = 'search-result';
+const RESULTS_LANGUAGE = 'search-result';
 
 /**
  * The results tab: a read-only `search-result` document that the panel rewrites
@@ -26,9 +28,21 @@ export class ResultsView implements vscode.Disposable {
     private rebuildQueued = false;
     private opening = false;
     private syncQueued = false;
+    /**
+     * Called when a file opened inside the results group had to be moved out of it, so the
+     * host can pause editor prefills: a follow link selects the hit, and that selection is
+     * not a new query.
+     */
+    public onFollowNavigate?: (file: string, line: number) => void;
     /** `${file}:${line}` -> document line of the matching hit, filled by render(). */
     private matchLines = new Map<string, number>();
+    /** One entry per result line, for the whole-line Follow link. */
+    private hits: Array<{ documentLine: number; file: string; sourceLine: number }> = [];
+    /** One entry per file header line, so it can be followed too. */
+    private fileLines: Array<{ documentLine: number; file: string }> = [];
     private lastPeek?: { line: number; version: number; at: number };
+    /** When a link was last followed, so a click that navigated does not also peek. */
+    private lastFollowAt = 0;
 
     public constructor(
         private readonly getSnapshot: () => ResultsSnapshot | undefined,
@@ -40,9 +54,72 @@ export class ResultsView implements vscode.Disposable {
             this.provider,
             vscode.workspace.registerTextDocumentContentProvider(ResultsDocumentProvider.scheme, this.provider),
             vscode.commands.registerCommand('vscode-fast-index.openResultsInEditor', () => this.open()),
-            vscode.window.onDidChangeTextEditorSelection(event => this.onSelection(event))
+            vscode.commands.registerCommand('vscode-fast-index.followResult', (file: string, line: number) =>
+                this.followResult(file, line)),
+            vscode.window.onDidChangeTextEditorSelection(event => this.onSelection(event)),
+            vscode.window.onDidChangeActiveTextEditor(editor => this.onNavigatedIntoResultsGroup(editor)),
+            // VS Code's own search-result language only makes the line-number prefix of a hit
+            // followable (its definition range stops at the "12: " text). Link the whole line
+            // ourselves so ctrl+click works anywhere on it.
+            vscode.languages.registerDocumentLinkProvider({ scheme: ResultsDocumentProvider.scheme }, {
+                provideDocumentLinks: document => this.resultLinks(document),
+            })
         );
         return this.disposables;
+    }
+
+    private resultLinks(document: vscode.TextDocument): vscode.DocumentLink[] {
+        if (document.uri.toString() !== ResultsDocumentProvider.uri.toString()) return [];
+        const links: vscode.DocumentLink[] = [];
+        const add = (documentLine: number, file: string, line: number) => {
+            if (documentLine >= document.lineCount) return;
+            const args = encodeURIComponent(JSON.stringify([file, line]));
+            links.push({
+                range: document.lineAt(documentLine).range,
+                target: vscode.Uri.parse(`command:vscode-fast-index.followResult?${args}`),
+                tooltip: `${file}:${line + 1}`,
+            });
+        };
+        for (const hit of this.hits) add(hit.documentLine, hit.file, hit.sourceLine);
+        for (const entry of this.fileLines) add(entry.documentLine, entry.file, 0);
+        return links;
+    }
+
+    /** Opens a hit next to the results, so following a link never hides them. */
+    private async followResult(file: string, line: number): Promise<void> {
+        this.lastFollowAt = Date.now();
+        // Before the open: the selection change fires while the editor is being shown, and its
+        // 250ms debounce can beat the awaits below.
+        this.onFollowNavigate?.(file, line);
+        try {
+            const document = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+            const position = new vscode.Position(Math.max(0, line), 0);
+            await vscode.window.showTextDocument(document, {
+                viewColumn: await this.neighbourColumn(),
+                preserveFocus: false,
+                selection: new vscode.Range(position, position),
+            });
+        } catch {
+            /* the file went away since the search */
+        }
+    }
+
+    /** The group next to the results tab: above it when there is one, otherwise below. */
+    private async neighbourColumn(): Promise<vscode.ViewColumn | undefined> {
+        const host = this.resultsGroupColumn();
+        if (host === undefined) return undefined;
+        return (host > 1 ? host - 1 : host + 1) as vscode.ViewColumn;
+    }
+
+    /** Column of the group holding the results tab, if it is open. */
+    private resultsGroupColumn(): vscode.ViewColumn | undefined {
+        const target = ResultsDocumentProvider.uri.toString();
+        for (const group of vscode.window.tabGroups.all) {
+            const holds = group.tabs.some(tab =>
+                tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === target);
+            if (holds) return group.viewColumn;
+        }
+        return undefined;
     }
 
     /**
@@ -75,20 +152,48 @@ export class ResultsView implements vscode.Disposable {
 
             const document = await vscode.workspace.openTextDocument(ResultsDocumentProvider.uri);
             await this.ensureLanguage(document);
-            await vscode.window.showTextDocument(document, {
-                preview: false,
-                preserveFocus: options?.preserveFocus === true
-            });
+            await this.showInDock(document, options?.preserveFocus === true);
         } finally {
             this.opening = false;
         }
     }
 
     /**
+     * Puts the tab where `fastIndex.resultsDock` says. `below` splits the active group
+     * downwards first, so the document the search came from stays visible above the results
+     * instead of being hidden behind them in the same group.
+     */
+    private async showInDock(document: vscode.TextDocument, preserveFocus: boolean): Promise<void> {
+        const dock = vscode.workspace.getConfiguration('fastIndex').get<string>('resultsDock', 'current');
+
+        if (dock === 'right') {
+            await vscode.window.showTextDocument(document, {
+                viewColumn: vscode.ViewColumn.Beside,
+                preview: false,
+                preserveFocus,
+            });
+            return;
+        }
+
+        if (dock === 'below') {
+            try {
+                // Splits the current editor into a new group below and focuses it; the
+                // original stays in place. Showing the results there replaces the copy.
+                await vscode.commands.executeCommand('workbench.action.splitEditorDown');
+            } catch {
+                /* no editor to split from: fall back to the active group */
+            }
+        }
+
+        await vscode.window.showTextDocument(document, { preview: false, preserveFocus });
+    }
+
+    /**
      * Called whenever the panel produces new results or changes its layout.
-     * `autoOpen` mirrors the `fastIndex.autoOpenResults` setting: when the tab
-     * was closed, a search opens it again — without stealing focus from the
-     * panel the user is typing in.
+     * `autoOpen` mirrors the `fastIndex.autoOpenResults` setting: a search makes the tab
+     * visible — it opens it when closed, and brings an existing tab in front when the user
+     * has switched to another document — without stealing keyboard focus from wherever the
+     * search came from.
      */
     public async sync(autoOpen: boolean): Promise<void> {
         if (this.opening) {
@@ -98,6 +203,7 @@ export class ResultsView implements vscode.Disposable {
         }
         if (this.isOpen()) {
             await this.refresh();
+            if (autoOpen && !this.isActiveTab()) await this.surface();
             return;
         }
         if (!autoOpen) return;
@@ -109,6 +215,53 @@ export class ResultsView implements vscode.Disposable {
         if (this.syncQueued) {
             this.syncQueued = false;
             await this.sync(false);
+        }
+    }
+
+    /** True when the results tab is the visible tab of the active group. */
+    private isActiveTab(): boolean {
+        const target = ResultsDocumentProvider.uri.toString();
+        const input = vscode.window.tabGroups.activeTabGroup?.activeTab?.input;
+        return input instanceof vscode.TabInputText && input.uri.toString() === target;
+    }
+
+    /**
+     * The results tab has its own group: a file that opens there — Follow link (ctrl+click)
+     * or any other open — is moved to the neighbouring group, so the results stay in view
+     * instead of being replaced by the file the link pointed at.
+     */
+    private onNavigatedIntoResultsGroup(editor: vscode.TextEditor | undefined): void {
+        if (!editor) return;
+        if (editor.document.uri.scheme === ResultsDocumentProvider.scheme) return;
+        const groups = vscode.window.tabGroups.all;
+        if (groups.length < 2) return;
+
+        const host = this.resultsGroupColumn();
+        if (host === undefined || editor.viewColumn !== host) return;
+        // The click that opened this file was a follow; do not also peek at it.
+        this.lastFollowAt = Date.now();
+
+
+        const command = host > 1
+            ? 'workbench.action.moveEditorToPreviousGroup'
+            : 'workbench.action.moveEditorToNextGroup';
+        // The editor has just been shown; move it once the workbench settles, then let the
+        // host know the selection that follows is navigation, not a query.
+        setTimeout(() => {
+            void vscode.commands.executeCommand(command).then(
+                () => this.onFollowNavigate?.(editor.document.uri.fsPath, -1),
+                () => undefined
+            );
+        }, 0);
+    }
+
+    /** Brings an already-open results tab to the front without moving keyboard focus. */
+    private async surface(): Promise<void> {
+        try {
+            const document = await vscode.workspace.openTextDocument(ResultsDocumentProvider.uri);
+            await vscode.window.showTextDocument(document, { preview: false, preserveFocus: true });
+        } catch {
+            /* the tab went away between the check and the call */
         }
     }
 
@@ -171,15 +324,17 @@ export class ResultsView implements vscode.Disposable {
     }
 
     private async ensureLanguage(document: vscode.TextDocument): Promise<void> {
-        if (document.languageId === SEARCH_RESULT_LANGUAGE) return;
+        if (document.languageId === RESULTS_LANGUAGE) return;
         try {
-            await vscode.languages.setTextDocumentLanguage(document, SEARCH_RESULT_LANGUAGE);
+            await vscode.languages.setTextDocumentLanguage(document, RESULTS_LANGUAGE);
         } catch {
             /* keep whatever language the host picked */
         }
     }
 
     private async render(snapshot: ResultsSnapshot): Promise<string> {
+        const startedAt = Date.now();
+        let filesRead = 0;
         const configured = vscode.workspace.getConfiguration('fastIndex').get<number>('resultContextLines');
         const radius = Math.max(0, Math.min(50, Math.round(typeof configured === 'number' ? configured : 2)));
 
@@ -191,9 +346,14 @@ export class ResultsView implements vscode.Disposable {
 
             let lines: string[] = [];
             try {
+                // Prefer a live buffer (unsaved edits must show up), but never call
+                // openTextDocument just to read a few context lines: that loads the file
+                // into the document model and hands it to every language server for the
+                // workspace, which costs far more than reading it from disk.
                 const open = vscode.workspace.textDocuments.find(document => document.uri.fsPath === file);
-                const document = open ?? await vscode.workspace.openTextDocument(vscode.Uri.file(file));
-                lines = document.getText().split('\n');
+                const text = open ? open.getText() : await fs.promises.readFile(file, 'utf8');
+                lines = text.split('\n');
+                filesRead++;
             } catch {
                 lines = [];
             }
@@ -203,6 +363,9 @@ export class ResultsView implements vscode.Disposable {
 
         const built = await buildResultsText(snapshot, rows, radius, readSource);
         this.matchLines = built.matchLines;
+        this.hits = built.hits;
+        this.fileLines = built.fileLines;
+        log(`results render ${rows.length} rows from ${filesRead} files in ${Date.now() - startedAt} ms`);
         return built.text;
     }
 
@@ -244,7 +407,13 @@ export class ResultsView implements vscode.Disposable {
             this.lastPeek.version === textEditor.document.version && now - this.lastPeek.at < 400) return;
         this.lastPeek = { line, version: textEditor.document.version, at: now };
 
-        void vscode.commands.executeCommand('editor.action.peekDefinition');
+        // A modifier-click follows a link instead (ctrl/cmd+click), and the two cannot be
+        // told apart from this event. Give the link a moment to take over: if a follow
+        // happened, do not also open a peek on top of the editor it just navigated to.
+        setTimeout(() => {
+            if (this.lastFollowAt >= now) return;
+            void vscode.commands.executeCommand('editor.action.peekDefinition');
+        }, 150);
     }
 
     public dispose(): void {
@@ -252,3 +421,18 @@ export class ResultsView implements vscode.Disposable {
         this.disposables.length = 0;
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

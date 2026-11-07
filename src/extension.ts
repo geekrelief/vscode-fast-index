@@ -83,6 +83,9 @@ export async function activate(context: vscode.ExtensionContext) {
         () => sidebarProvider.getViewMode()
     );
     context.subscriptions.push({ dispose: () => resultsView.dispose() }, ...resultsView.register());
+    // A follow link moves the file into the neighbouring group; the caret it lands on is
+    // navigation, so the panel must not adopt it as the next query.
+    resultsView.onFollowNavigate = (file, line) => sidebarProvider.noteFollow(file, line);
     context.subscriptions.push(resultsTreeView, { dispose: () => resultsTree.dispose() });
 
     // Colors the hovered path through file decorations (the only tree API that
@@ -103,11 +106,16 @@ export async function activate(context: vscode.ExtensionContext) {
         if (node && node.kind === 'match') resultsView.reveal(node.row.file, node.row.line);
     }));
     sidebarProvider.onResults = (snapshot, reason) => {
+        const startedAt = Date.now();
         resultsTree.setResults((snapshot?.rows ?? []) as ResultRow[], sidebarProvider.showContextLineEnabled());
+        const treeMs = Date.now() - startedAt;
         // Only a real search may pop the tab open; re-ordering the panel must not.
         const autoOpen = reason === 'search'
             && vscode.workspace.getConfiguration('fastIndex').get<boolean>('autoOpenResults') === true;
-        void resultsView.sync(autoOpen);
+        void resultsView.sync(autoOpen).then(() => {
+            log(`results view ${autoOpen ? 'sync(opening)' : 'sync'} -> ${(snapshot?.rows ?? []).length} rows in ` +
+                `${Date.now() - startedAt} ms (tree ${treeMs} ms)`);
+        });
     };
     // Resting on a result scrolls the results tab to that hit (no preview pane).
     sidebarProvider.onHover = (file: string, line: number) => resultsView.reveal(file, line);
@@ -230,7 +238,10 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 
     if (pendingRoots.length === 0) {
-        sidebarProvider.setStatus(`Ready · ${cache.fileCount.toLocaleString()} files`, 'ready');
+        sidebarProvider.setStatus(
+            `Ready · ${cache.fileCount.toLocaleString()} files · ${indexer.trigramCount.toLocaleString()} terms`,
+            'ready'
+        );
         if (!hasIndexedBefore && cache.status === 'loaded') {
             await context.workspaceState.update(INDEXED_FLAG, true);
         }
