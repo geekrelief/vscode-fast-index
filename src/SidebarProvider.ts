@@ -954,6 +954,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         const startedAt = Date.now();
         let filesRead = 0;
         let bytesRead = 0;
+        // Our own work vs. wall clock: the difference is time the extension host spent elsewhere.
+        let readMs = 0;
+        let scanMs = 0;
 
         const readMatches = async (file: string): Promise<any[]> => {
             const fileResults: any[] = [];
@@ -964,10 +967,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             try {
                 // Prefer the live buffer: a replaced (but unsaved) document must match.
                 const openDocument = vscode.workspace.textDocuments.find(document => document.uri.fsPath === file);
+                const readStarted = Date.now();
                 const content = openDocument ? openDocument.getText() : await fs.promises.readFile(file, 'utf-8');
+                readMs += Date.now() - readStarted;
                 readOk = true;
                 filesRead++;
                 bytesRead += content.length;
+                const scanStarted = Date.now();
                 searchRegex.lastIndex = 0;
                 let match;
 
@@ -1007,6 +1013,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         nameMatch
                     });
                 }
+                scanMs += Date.now() - scanStarted;
             } catch (e) { }
             // A file named after the query is a hit even if no line mentions it.
             if (readOk && fileResults.length === 0 && !isRegex && fileNameRank(file, query) <= 2
@@ -1058,7 +1065,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         }
 
         log(`snippets "${query}" -> ${snippets.length} rows from ${filesRead} files ` +
-            `(${(bytesRead / 1048576).toFixed(1)} MB) in ${Date.now() - startedAt} ms`);
+            `(${(bytesRead / 1048576).toFixed(1)} MB) in ${Date.now() - startedAt} ms ` +
+            `(read ${readMs} ms, scan ${scanMs} ms)`);
         return snippets.slice(0, maxResults);
     }
 
@@ -2450,6 +2458,8 @@ vscode.postMessage({ type: 'getCaches' });
         `;
     }
 }
+
+
 
 
 
