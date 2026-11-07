@@ -18,6 +18,12 @@ import {
     splitIgnoreFiles
 } from './ignore';
 
+/**
+ * How a build ended. Only 'built' means the index on disk was replaced; 'canceled'
+ * and 'failed' leave the previous index in place.
+ */
+export type BuildOutcome = 'built' | 'canceled' | 'failed' | 'busy';
+
 export interface CacheLoadResult {
     status: 'loaded' | 'partial' | 'missing';
     fileCount: number;
@@ -365,6 +371,8 @@ export class ProjectIndexer {
     private worker: Worker;
     /** Results applied since the worker was last acknowledged. */
     private ackWindow = 0;
+    /** Set while a build is being canceled, so the partial result is discarded. */
+    private abortRequested = false;
     /** Files a previous build indexed that turned out to be binary, since the last save. */
     private binaryRemovals = 0;
 
@@ -1031,10 +1039,28 @@ export class ProjectIndexer {
 
     // ---- building ----------------------------------------------------------------
 
-    public async buildIndex(onlyRoots?: string[], force = false): Promise<boolean> {
-        if (this.isIndexing) return false;
+    public get isBuilding(): boolean {
+        return this.isIndexing;
+    }
+
+    /**
+     * Asks the running build to stop. The worker is told directly, so it stops at the
+     * next batch boundary instead of finishing the file list; whatever was built so
+     * far is discarded and the saved index is reloaded unchanged.
+     */
+    public cancelBuild(): void {
+        if (!this.isIndexing) return;
+        this.abortRequested = true;
+        // Resumes a worker that is waiting for an ack, so it can see the abort.
+        this.worker.postMessage({ type: 'abort' });
+        this.worker.postMessage({ type: 'ack' });
+    }
+
+    public async buildIndex(onlyRoots?: string[], force = false): Promise<BuildOutcome> {
+        if (this.isIndexing) return 'busy';
         this.isIndexing = true;
-        this.onProgress?.(onlyRoots && onlyRoots.length ? 'Reindexing folder…' : 'Indexing folders…');
+        this.abortRequested = false;
+        this.onProgress?.(onlyRoots && onlyRoots.length ? 'Reindexing folder…' : 'Indexing folders…', true);
 
         try {
             const config = vscode.workspace.getConfiguration('fastIndex');
@@ -1063,7 +1089,7 @@ export class ProjectIndexer {
 
             if (selected.length === 0) {
                 vscode.window.showWarningMessage('Fast Index: this window has no workspace folder to index.');
-                return false;
+                return 'failed';
             }
 
             const plans: BuildPlan[] = [];
@@ -1095,22 +1121,25 @@ export class ProjectIndexer {
             const total = plans.reduce((sum, plan) => sum + plan.paths.length, 0);
             if (total === 0) {
                 vscode.window.showWarningMessage('Fast Index: no files matched the current include/exclude settings.');
-                return false;
+                return 'failed';
             }
 
             return await vscode.window.withProgress({
                 location: vscode.ProgressLocation.Notification,
                 title: force ? 'Rebuilding index…' : 'Indexing project…',
-                cancellable: false
-            }, async (progress) => {
+                // The notification's own cancel button, plus the settings panel's.
+                cancellable: true
+            }, async (progress, token) => {
                 let processed = 0;
                 let changed = 0;
                 let skipped = 0;
                 let removed = 0;
+                const cancellation = token?.onCancellationRequested(() => this.cancelBuild());
 
                 try {
                     for (const plan of plans) {
                         if (plan.paths.length === 0) continue;
+                        if (this.abortRequested) break;
 
                         const result = await this.runBatch(
                             plan,
@@ -1125,6 +1154,7 @@ export class ProjectIndexer {
                                 });
                             }
                         );
+                        if (result.aborted) break;
                         changed += result.changed;
                         skipped += result.skipped;
 
@@ -1138,6 +1168,19 @@ export class ProjectIndexer {
                                 removed++;
                             }
                         }
+                    }
+
+                    if (this.abortRequested) {
+                        // Discard the partial build: the segments on disk were never touched,
+                        // so reloading them leaves the previous index exactly as it was.
+                        await this.reloadAll();
+                        const summary = `${this.fileIdOf.size.toLocaleString()} files · ${this.trigrams.length.toLocaleString()} terms`;
+                        this.onProgress?.(`Ready · ${summary}`, false);
+                        log(`indexing canceled after ${processed.toLocaleString()} files; previous index reloaded`);
+                        vscode.window.showInformationMessage(
+                            `Fast Index: indexing canceled. The previous index is unchanged (${summary}).`
+                        );
+                        return 'canceled';
                     }
 
                     const needsSave = force || changed > 0 || removed > 0 || this.binaryRemovals > 0 || this.overlay.size > 0;
@@ -1164,15 +1207,18 @@ export class ProjectIndexer {
                             (changed > 0 ? `, ${changed.toLocaleString()} updated` : '') + note + '.'
                         );
                     }
-                    return true;
+                    return 'built';
                 } catch (err: any) {
                     vscode.window.showWarningMessage(`Fast Index: indexing failed: ${err?.message ?? err}`);
                     this.onProgress?.('Indexing failed', false);
-                    return false;
+                    return 'failed';
+                } finally {
+                    cancellation?.dispose();
                 }
             });
         } finally {
             this.isIndexing = false;
+            this.abortRequested = false;
         }
     }
 
@@ -1181,7 +1227,7 @@ export class ProjectIndexer {
         maxFileSizeKB: number,
         force: boolean,
         onDone: (count: number) => void
-    ): Promise<{ changed: number; skipped: number }> {
+    ): Promise<{ changed: number; skipped: number; aborted: boolean }> {
         return new Promise((resolve, reject) => {
             let changed = 0;
             let skipped = 0;
@@ -1197,7 +1243,7 @@ export class ProjectIndexer {
                     skipped = typeof msg.skipped === 'number' ? msg.skipped : 0;
                     onDone(skipped);
                     cleanup();
-                    resolve({ changed, skipped });
+                    resolve({ changed, skipped, aborted: msg.aborted === true });
                 }
             };
             const onError = (err: Error) => {

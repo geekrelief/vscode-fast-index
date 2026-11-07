@@ -32,8 +32,8 @@ export async function activate(context: vscode.ExtensionContext) {
     const skipped = new Set((context.globalState.get<string[]>(SKIPPED_KEY, [])).map(normalize));
 
     const runBuild = async (only?: string[], force = false): Promise<boolean> => {
-        const saved = await indexer.buildIndex(only, force);
-        if (saved) {
+        const outcome = await indexer.buildIndex(only, force);
+        if (outcome === 'built') {
             await context.workspaceState.update(INDEXED_FLAG, true);
             if (skipped.size > 0) {
                 skipped.clear();
@@ -44,7 +44,7 @@ export async function activate(context: vscode.ExtensionContext) {
             if (coversEveryFolder(only, indexer.rootPaths)) sidebarProvider.markIndexed();
             else await sidebarProvider.refreshCacheList();
         }
-        return saved;
+        return outcome === 'built';
     };
 
     const rememberSkipped = async (roots: string[]): Promise<void> => {
@@ -198,6 +198,7 @@ export async function activate(context: vscode.ExtensionContext) {
         // Palette entry for loading a `.gitignore`-style file into fastIndex.ignoreFiles.
         vscode.commands.registerCommand('vscode-fast-index.importIgnoreFile', () => sidebarProvider.importIgnoreFile()),
         vscode.commands.registerCommand('vscode-fast-index.openCacheFolder', () => sidebarProvider.openCacheFolder()),
+        vscode.commands.registerCommand('vscode-fast-index.cancelIndex', () => sidebarProvider.cancelIndex()),
         vscode.commands.registerCommand('vscode-fast-index.showMenu', async () => {
             const items: (vscode.QuickPickItem & { id: string })[] = [
                 { id: 'pinned', label: '$(pin) Show or hide pinned searches' },

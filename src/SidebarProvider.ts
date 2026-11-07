@@ -43,6 +43,27 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this._statusState = state;
         // The status lives in the view title bar, not in a row of its own.
         this.updateViewDescription();
+        // Indexing disables the controls that would change the index underneath it.
+        void this.postToViews({ type: 'busy', value: state === 'busy', message: text });
+    }
+
+    /** Cancels a running build; the previous index is kept. */
+    public cancelIndex(): void {
+        this.indexer.cancelBuild();
+    }
+
+    /** True while a build has the index; every mutating control is refused then. */
+    private get building(): boolean {
+        return this.indexer.isBuilding === true;
+    }
+
+    /** True when a control was refused because a build is in progress. */
+    private refuseWhileBuilding(action: string): boolean {
+        if (!this.building) return false;
+        vscode.window.showInformationMessage(
+            `Fast Index: ${action} is unavailable while the index is being built. Cancel it first.`
+        );
+        return true;
     }
 
     /**
@@ -115,6 +136,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 ignoreFiles: config.get<string>('ignoreFiles') || '',
                 ignoreStats: this.indexer.ignoreFiles,
                 ignoreRuleCount: this.indexer.ignoreRuleCount,
+                indexing: this.building,
                 maxFileSizeKB: config.get<number>('maxFileSizeKB') || 512,
                 maxResults: config.get<number>('maxResults') || 50,
                 maxRecentSearches: config.get<number>('maxRecentSearches') ?? 20,
@@ -246,6 +268,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
      * large tree (compiled binaries, engine dumps) can be excluded up front.
      */
     public async importIgnoreFile(offerReindex = true): Promise<void> {
+        if (this.refuseWhileBuilding('loading an ignore file')) return;
         const folders = (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath);
         if (folders.length === 0) {
             vscode.window.showWarningMessage('Fast Index: open a folder before loading an ignore file.');
@@ -697,16 +720,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     break;
                 }
                 case 'deleteCaches': {
+                    if (this.refuseWhileBuilding('deleting cached indexes')) break;
                     const requested: string[] = Array.isArray(data.files) ? data.files : [];
                     await this.confirmAndDeleteCaches(requested, false);
                     break;
                 }
                 case 'deleteStaleCaches': {
+                    if (this.refuseWhileBuilding('deleting cached indexes')) break;
                     const entries = await this.indexer.listCaches();
                     await this.confirmAndDeleteCaches(entries.filter(entry => !entry.exists).map(entry => entry.file), true);
                     break;
                 }
                 case 'reindexCaches': {
+                    if (this.refuseWhileBuilding('reindexing')) break;
                     const roots: string[] = Array.isArray(data.roots) ? data.roots : [];
                     if (roots.length === 0) break;
 
@@ -729,6 +755,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     break;
                 }
                 case 'rebuildIndex': {
+                    if (this.refuseWhileBuilding('rebuilding')) break;
                     this.promptedIndexSignature = '';
                     // Await, so the cache list below shows the new sizes and dates.
                     await vscode.commands.executeCommand('vscode-fast-index.buildIndex');
@@ -738,6 +765,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 case 'reindexNow': {
                     // The banner's action: apply the changed settings everywhere, but let the
                     // indexer skip files whose size and timestamp are unchanged.
+                    if (this.refuseWhileBuilding('reindexing')) break;
                     this.promptedIndexSignature = '';
                     const roots = this.indexer.rootPaths;
                     if (roots.length === 0) break;
@@ -755,6 +783,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 }
                 case 'importIgnoreFile': {
                     await this.importIgnoreFile();
+                    break;
+                }
+                case 'cancelIndex': {
+                    this.cancelIndex();
                     break;
                 }
                 case 'settingsClosed': {
@@ -840,8 +872,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         vscode.window.showErrorMessage(`Fast Index: could not save ${failures.join(', ')}`);
                     }
                     // A new ignore list applies to the watcher and the next search at once;
-                    // files it covers leave the index without waiting for a rebuild.
-                    if (next.ignoreFiles !== current.ignoreFiles) {
+                    // files it covers leave the index without waiting for a rebuild. Mid-build
+                    // the next build applies it instead, so the running one keeps its rules.
+                    if (next.ignoreFiles !== current.ignoreFiles && !this.building) {
                         await this.indexer.refreshIgnoreRules();
                         this.indexer.removeIgnoredFiles();
                     }
@@ -1353,6 +1386,24 @@ $('undoIndexBtn').addEventListener('click', function () { vscode.postMessage({ t
 $('loadIgnoreBtn').addEventListener('click', function () { vscode.postMessage({ type: 'importIgnoreFile' }); });
 $('openCacheFolderBtn').addEventListener('click', function () { vscode.postMessage({ type: 'openCacheFolder' }); });
 $('reindexNowBtn').addEventListener('click', function () { vscode.postMessage({ type: 'reindexNow' }); });
+$('cancelIndexBtn').addEventListener('click', function () { vscode.postMessage({ type: 'cancelIndex' }); });
+
+// Controls that change the index are off while a build owns it.
+const buildingFields = ['confIncludeExt', 'confExcludePat', 'confIgnoreFiles', 'loadIgnoreBtn',
+    'confMaxFileSize', 'reindexBtn', 'reindexNowBtn', 'undoIndexBtn',
+    'cacheSelectAll', 'reindexCachesBtn', 'deleteCachesBtn', 'deleteStaleBtn'];
+let indexing = false;
+
+function applyBuilding() {
+    buildingFields.forEach(function (id) { const el = $(id); if (el) el.disabled = indexing; });
+    // Cache rows are rendered fresh on every list update, so they are handled here too.
+    document.querySelectorAll('.cache-check').forEach(function (box) { box.disabled = indexing; });
+    const panel = $('settingsPanel');
+    if (panel) panel.classList.toggle('indexing', indexing);
+    const cancel = $('cancelIndexBtn');
+    if (cancel) cancel.style.display = indexing ? '' : 'none';
+    if (!indexing) updateCacheControls();
+}
 
 let cacheEntries = [];
 const selectedCaches = new Set();
@@ -1370,18 +1421,18 @@ function updateCacheControls() {
     const selected = Array.from(selectedCaches);
     const stale = cacheEntries.filter(function (entry) { return !entry.exists; });
     const deleteBtn = $('deleteCachesBtn');
-    deleteBtn.disabled = selected.length === 0;
+    deleteBtn.disabled = indexing || selected.length === 0;
     deleteBtn.textContent = 'Delete selected';
     const reindexBtn = $('reindexCachesBtn');
-    reindexBtn.disabled = selected.length === 0;
+    reindexBtn.disabled = indexing || selected.length === 0;
     reindexBtn.textContent = selected.length ? 'Reindex (' + selected.length + ')' : 'Reindex selected';
     const staleBtn = $('deleteStaleBtn');
-    staleBtn.disabled = stale.length === 0;
+    staleBtn.disabled = indexing || stale.length === 0;
     staleBtn.textContent = stale.length ? 'Delete stale (' + stale.length + ')' : 'Delete stale';
     const all = $('cacheSelectAll');
     all.checked = cacheEntries.length > 0 && selected.length === cacheEntries.length;
     all.indeterminate = selected.length > 0 && selected.length < cacheEntries.length;
-    all.disabled = cacheEntries.length === 0;
+    all.disabled = indexing || cacheEntries.length === 0;
 }
 
 function renderCaches() {
@@ -1407,6 +1458,7 @@ function renderCaches() {
         check.className = 'cache-check';
         check.value = entry.file;
         check.checked = selectedCaches.has(entry.file);
+        check.disabled = indexing;
         check.addEventListener('change', function () {
             if (check.checked) selectedCaches.add(entry.file);
             else selectedCaches.delete(entry.file);
@@ -1489,6 +1541,8 @@ function fill(value) {
             : '';
     }
     renderIgnoreStats(value);
+    indexing = value.indexing === true;
+    applyBuilding();
 }
 
 /** One line describing what each configured ignore file contributed. */
@@ -1513,6 +1567,10 @@ function renderIgnoreStats(value) {
 window.addEventListener('message', function (event) {
     const message = event.data;
     if (message.type === 'configData') fill(message.value);
+    if (message.type === 'busy') {
+        indexing = message.value === true;
+        applyBuilding();
+    }
     if (message.type === 'cacheList') {
         cacheEntries = Array.isArray(message.value) ? message.value : [];
         renderCaches();
@@ -1603,7 +1661,10 @@ vscode.postMessage({ type: 'getCaches' });
                             <button id="reindexNowBtn" class="link-btn" title="Apply the changed settings to every folder, re-reading only files whose size or timestamp changed.">Reindex now</button>
                             <button id="undoIndexBtn" class="link-btn" title="Restore the include/exclude/ignore/size settings the current index was built with">Undo changes</button>
                         </div>
-                        <button id="reindexBtn" title="Re-read every file in every folder with the current settings (ignores stored file times).">🔁 Rebuild all</button>
+                        <div class="reindex-actions">
+                            <button id="reindexBtn" title="Re-read every file in every folder with the current settings (ignores stored file times).">🔁 Rebuild all</button>
+                            <button id="cancelIndexBtn" class="danger" style="display: none;" title="Stop indexing. The previous index is kept unchanged.">Cancel indexing</button>
+                        </div>
                     </section>
 
                     <section class="settings-group">
@@ -1704,6 +1765,11 @@ vscode.postMessage({ type: 'getCaches' });
                     button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 6px 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 0.9em; }
                     button:hover { background: var(--vscode-button-hoverBackground); }
                     button:disabled { opacity: 0.5; cursor: not-allowed; }
+                    /* A build owns the index: everything that could change it is off. */
+                    .reindex-actions { display: flex; gap: 6px; align-items: stretch; }
+                    .reindex-actions button { flex: 1 1 auto; }
+                    .settings-panel.indexing .setting-item label,
+                    .settings-panel.indexing .cache-row { opacity: 0.55; }
                     
                     .settings-panel { display: none; flex-direction: column; gap: 8px; margin-bottom: 15px; padding: 10px; background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-widget-border); border-radius: 4px; }
                     .settings-group { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 10px; border: 1px solid var(--vscode-widget-border); border-radius: 6px; }

@@ -23,10 +23,25 @@ interface AckMessage {
     type: 'ack';
 }
 
+interface AbortMessage {
+    type: 'abort';
+}
+
 /** Resolves the batch loop once the indexer reports it has applied the last window. */
 let resumeBatch: (() => void) | undefined;
+/** Set by the indexer when it cancels a build; checked between files and per window. */
+let aborted = false;
 
-parentPort?.on('message', (message: BatchMessage | SingleMessage | AckMessage) => {
+parentPort?.on('message', (message: BatchMessage | SingleMessage | AckMessage | AbortMessage) => {
+    if (message.type === 'abort') {
+        aborted = true;
+        // A worker waiting for an ack would never look at the flag: wake it up.
+        const resume = resumeBatch;
+        resumeBatch = undefined;
+        resume?.();
+        return;
+    }
+
     if (message.type === 'ack') {
         const resume = resumeBatch;
         resumeBatch = undefined;
@@ -35,6 +50,8 @@ parentPort?.on('message', (message: BatchMessage | SingleMessage | AckMessage) =
     }
 
     if (message.type === 'processBatch') {
+        // A new batch starts clean: any earlier abort belonged to the previous build.
+        aborted = false;
         void processBatch(message);
         return;
     }
@@ -73,6 +90,7 @@ async function processBatch(message: BatchMessage): Promise<void> {
     let window = 0;
 
     for (let i = 0; i < paths.length; i++) {
+        if (aborted) break;
         const filePath = paths[i];
         let sent = false;
         try {
@@ -112,8 +130,9 @@ async function processBatch(message: BatchMessage): Promise<void> {
             window = 0;
             // Wait for the indexer to apply these before producing more.
             await new Promise<void>((resolve) => { resumeBatch = resolve; });
+            if (aborted) break;
         }
     }
 
-    parentPort?.postMessage({ type: 'batchDone', skipped });
+    parentPort?.postMessage({ type: 'batchDone', skipped, aborted });
 }
