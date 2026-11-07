@@ -41,6 +41,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private indexing = false;
     /** The last search requested while indexing, replayed when the build ends. */
     private deferredSearch?: { value: string; isMatchCase: boolean; isRegex: boolean; include: string[]; exclude: string[]; filter: string; reason: string };
+    /** Keeps the "prefill paused while indexing" log to one line per build. */
+    private prefillPausedNoted = false;
 
     public setStatus(text: string, state: 'busy' | 'ready' | 'idle' = 'busy'): void {
         this._statusText = text;
@@ -56,6 +58,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             this.searchGeneration++;
             log('index build started: in-flight search cancelled');
         } else if (!this.indexing && wasIndexing) {
+            this.prefillPausedNoted = false;
             // The index changed under the results on screen; refresh them once the build
             // has really finished (its progress status arrives before `isIndexing` drops).
             this.scheduleSearchResume();
@@ -1055,6 +1058,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     private prefillFromEditor(source: string = 'cursor'): void {
+        // Auto Search is a search: while a build owns the index, the box stays put.
+        if (this.indexing || this.indexer.isBuilding) {
+            if (!this.prefillPausedNoted) {
+                this.prefillPausedNoted = true;
+                log('prefill paused: the index is being built');
+            }
+            return;
+        }
         if (this.locked) {
             this.noteLockedPrefill();
             return;
@@ -1823,6 +1834,12 @@ vscode.postMessage({ type: 'getCaches' });
                     .scope-input { width: 100%; padding: 3px 6px; font-size: 0.8em; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); box-sizing: border-box; }
                     .scope-input:focus { border-color: var(--vscode-focusBorder); outline: none; }
                     .scope-input::placeholder { opacity: 0.6; }
+                    /* While a build owns the index, searching is off — the results stay usable. */
+                    body.indexing .search-panel .toggle-btn,
+                    body.indexing .search-panel .combo-caret,
+                    body.indexing .search-panel .clear-btn,
+                    body.indexing .pinned-item { opacity: 0.45; pointer-events: none; }
+                    body.indexing .search-panel input { opacity: 0.65; }
                     .toggle-btn { background: transparent; color: var(--vscode-icon-foreground); border: 1px solid transparent; padding: 2px 6px; margin-right: 2px; cursor: pointer; border-radius: 3px; font-size: 1.0em; display: flex; align-items: center; justify-content: center; user-select: none; font-weight: bold; }
                     .toggle-btn:hover { background: var(--vscode-toolbar-hoverBackground); }
                     .toggle-btn.active { background: var(--vscode-inputOption-activeBackground); color: var(--vscode-inputOption-activeForeground); border-color: var(--vscode-inputOption-activeBorder); }
@@ -2056,14 +2073,28 @@ vscode.postMessage({ type: 'getCaches' });
                     let isMatchCase = false;
                     let isRegex = false;
                     let currentResults = [];
+                    // While a build owns the index, searching is off; the results stay usable.
+                    let indexing = false;
+
+                    function applyIndexing() {
+                        document.body.classList.toggle('indexing', indexing);
+                        [searchInput, subSearchInput, scopeInclude, scopeExclude, replaceInput, replaceAllBtn]
+                            .forEach(function (el) { if (el) el.disabled = indexing; });
+                        searchInput.placeholder = indexing
+                            ? 'Indexing… search resumes when it finishes'
+                            : 'Search...';
+                        if (indexing) hideHistory();
+                    }
 
                     matchCaseBtn.addEventListener('click', () => {
+                        if (indexing) return;
                         isMatchCase = !isMatchCase;
                         matchCaseBtn.classList.toggle('active', isMatchCase);
                         triggerSearch();
                     });
 
                     regexBtn.addEventListener('click', () => {
+                        if (indexing) return;
                         isRegex = !isRegex;
                         regexBtn.classList.toggle('active', isRegex);
                         triggerSearch();
@@ -2078,6 +2109,7 @@ vscode.postMessage({ type: 'getCaches' });
 
 
                     replaceAllBtn.addEventListener('click', () => {
+                        if (indexing) return;
                         if (currentResults.length === 0) return;
                         const replaceText = replaceInput.value;
                         const query = searchInput.value;
@@ -2089,6 +2121,9 @@ vscode.postMessage({ type: 'getCaches' });
                     });
 
                     function triggerSearch(reason) {
+                        // A build owns the index: a query now could only answer from a
+                        // half-written index, so it is dropped instead of posted.
+                        if (indexing) return;
                         const query = searchInput.value;
                         vscode.postMessage({ type: 'search', value: query, isMatchCase, isRegex, filter: subQuery.trim(), reason: reason || 'typing', ...currentScope() }); 
                     }
@@ -2187,6 +2222,7 @@ vscode.postMessage({ type: 'getCaches' });
                     }
 
                     searchInput.addEventListener('keydown', function (event) {
+                        if (indexing) return;
                         if (event.key === 'ArrowDown' && event.altKey) {
                             // Alt+Down opens the full list, like a combo box.
                             event.preventDefault();
@@ -2218,6 +2254,7 @@ vscode.postMessage({ type: 'getCaches' });
                     historyBtn.addEventListener('mousedown', function (event) {
                         // Prevent the input from losing focus, then toggle the full list.
                         event.preventDefault();
+                        if (indexing) return;
                         if (historyList.style.display === 'flex') hideHistory();
                         else showHistory(true);
                     });
@@ -2686,6 +2723,8 @@ vscode.postMessage({ type: 'getCaches' });
                     }
 
                     function restorePinned(pin) {
+                        // Restoring a pin re-runs a search, so it waits for the build too.
+                        if (indexing) return;
                         // The pin owns the box: a slow editor prefill must not replace it.
                         userOwnsQuery = true;
                         vscode.postMessage({ type: 'pinRestore' });
@@ -2754,8 +2793,16 @@ vscode.postMessage({ type: 'getCaches' });
                             applyReplaceMode(message.value);
                         }
 
+                        if (message.type === 'busy') {
+                            indexing = message.value === true;
+                            applyIndexing();
+                        }
+
                         if (message.type === 'configData') {
-                            if (confPanelFont) confPanelFont.value = message.value.panelFontSize ?? 14;
+                            if (typeof message.value.indexing === 'boolean') {
+                                indexing = message.value.indexing;
+                                applyIndexing();
+                            }
                             if (typeof message.value.panelFontSize === 'number') {
                                 document.body.style.fontSize = Math.max(9, Math.min(24, message.value.panelFontSize)) + 'px';
                             }
@@ -2765,13 +2812,12 @@ vscode.postMessage({ type: 'getCaches' });
                                 renderResults();
                             }
                             if (typeof message.value.maxRecentSearches === 'number') {
-                                confMaxRecent.value = message.value.maxRecentSearches;
                                 maxRecent = Math.max(0, Math.min(100, Math.floor(message.value.maxRecentSearches)));
                                 recentSearches = recentSearches.slice(0, maxRecent);
                                 persistHistory();
                             }
                             // A live-saved setting such as the result limit applies at once.
-                            if (message.value.saved && searchInput.value && (isRegex || searchInput.value.length >= 3)) {
+                            if (!indexing && message.value.saved && searchInput.value && (isRegex || searchInput.value.length >= 3)) {
                                 clearTimeout(timeout);
                                 timeout = setTimeout(triggerSearch, 200);
                             }
@@ -2801,6 +2847,9 @@ vscode.postMessage({ type: 'getCaches' });
                         }
 
                         if (message.type === 'prefill') {
+                            // Auto Search is off while a build runs: the query would have to
+                            // wait anyway, and the box is disabled.
+                            if (indexing) return;
                             if (locked) return;
                             const prefill = String(message.value || '');
                             // Never overwrite a query the user is editing right now.
