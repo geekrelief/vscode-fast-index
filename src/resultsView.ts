@@ -182,17 +182,57 @@ export class ResultsView implements vscode.Disposable {
             return;
         }
 
+        let split: { column: vscode.ViewColumn; copyOf: vscode.Tab } | undefined;
         if (dock === 'below') {
+            // A split duplicates the editor that has focus; remember it so the copy can go.
+            const copyOf = vscode.window.tabGroups.activeTabGroup?.activeTab;
             try {
-                // Splits the current editor into a new group below and focuses it; the
-                // original stays in place. Showing the results there replaces the copy.
                 await vscode.commands.executeCommand('workbench.action.splitEditorDown');
+                const column = vscode.window.tabGroups.activeTabGroup?.viewColumn;
+                if (copyOf && column !== undefined) split = { column, copyOf };
             } catch {
                 /* no editor to split from: fall back to the active group */
             }
         }
 
         await vscode.window.showTextDocument(document, { preview: false, preserveFocus });
+
+        if (split) await this.closeSplitCopy(split.column, split.copyOf);
+    }
+
+    /**
+     * The group a `below` split created starts as a copy of the editor that had focus. Once the
+     * results are placed there the copy is just clutter — the original still sits above — so it
+     * is closed, leaving the split as document-above, results-below.
+     */
+    private async closeSplitCopy(column: vscode.ViewColumn, copyOf: vscode.Tab): Promise<void> {
+        const group = vscode.window.tabGroups.all.find(candidate => candidate.viewColumn === column);
+        if (!group) return;
+
+        const sameDocument = (candidate: vscode.Tab): boolean => {
+            const a = candidate.input;
+            const b = copyOf.input;
+            if (a instanceof vscode.TabInputText && b instanceof vscode.TabInputText) {
+                return a.uri.toString() === b.uri.toString();
+            }
+            if (a instanceof vscode.TabInputTextDiff && b instanceof vscode.TabInputTextDiff) {
+                return a.original.toString() === b.original.toString()
+                    && a.modified.toString() === b.modified.toString();
+            }
+            return false;
+        };
+
+        const copy = group.tabs.find(tab => sameDocument(tab)
+            && !(tab.input instanceof vscode.TabInputText
+                && tab.input.uri.toString() === ResultsDocumentProvider.uri.toString()));
+        if (!copy) return;
+
+        try {
+            await vscode.window.tabGroups.close(copy, true);
+            log('results: closed the copy the split left behind');
+        } catch {
+            /* already closed */
+        }
     }
 
     /**
