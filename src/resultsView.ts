@@ -77,13 +77,40 @@ export class ResultsView implements vscode.Disposable {
 
             const document = await vscode.workspace.openTextDocument(ResultsDocumentProvider.uri);
             await this.ensureLanguage(document);
-            await vscode.window.showTextDocument(document, {
-                preview: false,
-                preserveFocus: options?.preserveFocus === true
-            });
+            await this.showInDock(document, options?.preserveFocus === true);
         } finally {
             this.opening = false;
         }
+    }
+
+    /**
+     * Puts the tab where `fastIndex.resultsDock` says. `below` splits the active group
+     * downwards first, so the document the search came from stays visible above the results
+     * instead of being hidden behind them in the same group.
+     */
+    private async showInDock(document: vscode.TextDocument, preserveFocus: boolean): Promise<void> {
+        const dock = vscode.workspace.getConfiguration('fastIndex').get<string>('resultsDock', 'current');
+
+        if (dock === 'right') {
+            await vscode.window.showTextDocument(document, {
+                viewColumn: vscode.ViewColumn.Beside,
+                preview: false,
+                preserveFocus,
+            });
+            return;
+        }
+
+        if (dock === 'below') {
+            try {
+                // Splits the current editor into a new group below and focuses it; the
+                // original stays in place. Showing the results there replaces the copy.
+                await vscode.commands.executeCommand('workbench.action.splitEditorDown');
+            } catch {
+                /* no editor to split from: fall back to the active group */
+            }
+        }
+
+        await vscode.window.showTextDocument(document, { preview: false, preserveFocus });
     }
 
     /**

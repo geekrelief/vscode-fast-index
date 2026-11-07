@@ -251,6 +251,21 @@
           "default": false,
           "description": "Open the results editor automatically whenever a search finds matches and that editor is not already open. It appears without taking focus, so typing in the panel continues undisturbed."
         },
+        "fastIndex.resultsDock": {
+          "type": "string",
+          "enum": [
+            "current",
+            "below",
+            "right"
+          ],
+          "enumDescriptions": [
+            "Share the active editor group (the results tab replaces what is shown there)",
+            "Open in its own group below the active document (split view, document stays visible)",
+            "Open in its own group to the right of the active document"
+          ],
+          "default": "current",
+          "description": "Where the results editor is opened the first time. A tab that is already open is always brought forward where it lives."
+        },
         "fastIndex.autoSearchFromResults": {
           "type": "boolean",
           "default": false,
