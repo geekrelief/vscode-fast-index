@@ -13,7 +13,9 @@ import {
 } from './ResultsDocumentProvider';
 
 /** The language VS Code's own `search-result` extension owns. */
-const SEARCH_RESULT_LANGUAGE = 'search-result';
+/** Our own language id: its grammar embeds 	ext.searchResult, but no exclusive providers
+ * own it, so a link provider of ours can make the whole line followable. */
+const RESULTS_LANGUAGE = 'fast-index-results';
 
 /**
  * The results tab: a read-only `search-result` document that the panel rewrites
@@ -38,6 +40,8 @@ export class ResultsView implements vscode.Disposable {
     private matchLines = new Map<string, number>();
     /** One entry per result line, for the whole-line Follow link. */
     private hits: Array<{ documentLine: number; file: string; sourceLine: number }> = [];
+    /** One entry per file header line, so it can be followed too. */
+    private fileLines: Array<{ documentLine: number; file: string }> = [];
     private lastPeek?: { line: number; version: number; at: number };
     /** When a link was last followed, so a click that navigated does not also peek. */
     private lastFollowAt = 0;
@@ -59,8 +63,13 @@ export class ResultsView implements vscode.Disposable {
             // VS Code's own search-result language only makes the line-number prefix of a hit
             // followable (its definition range stops at the "12: " text). Link the whole line
             // ourselves so ctrl+click works anywhere on it.
-            vscode.languages.registerDocumentLinkProvider({ scheme: ResultsDocumentProvider.scheme }, {
+            vscode.languages.registerDocumentLinkProvider({ language: RESULTS_LANGUAGE }, {
                 provideDocumentLinks: document => this.resultLinks(document),
+            }),
+            // A definition for every hit keeps plain-click peek (and F12) working now that the
+            // document is our own language rather than VS Code's search-result.
+            vscode.languages.registerDefinitionProvider({ language: RESULTS_LANGUAGE }, {
+                provideDefinition: (document, position) => this.definitionAt(document, position),
             })
         );
         return this.disposables;
@@ -69,17 +78,31 @@ export class ResultsView implements vscode.Disposable {
     private resultLinks(document: vscode.TextDocument): vscode.DocumentLink[] {
         if (document.uri.toString() !== ResultsDocumentProvider.uri.toString()) return [];
         const links: vscode.DocumentLink[] = [];
-        for (const hit of this.hits) {
-            if (hit.documentLine >= document.lineCount) continue;
-            const args = encodeURIComponent(JSON.stringify([hit.file, hit.sourceLine]));
+        const add = (documentLine: number, file: string, line: number) => {
+            if (documentLine >= document.lineCount) return;
+            const args = encodeURIComponent(JSON.stringify([file, line]));
             links.push({
-                range: document.lineAt(hit.documentLine).range,
+                range: document.lineAt(documentLine).range,
                 target: vscode.Uri.parse(`command:vscode-fast-index.followResult?${args}`),
+                tooltip: `${file}:${line + 1}`,
             });
-        }
+        };
+        for (const hit of this.hits) add(hit.documentLine, hit.file, hit.sourceLine);
+        for (const entry of this.fileLines) add(entry.documentLine, entry.file, 0);
         return links;
     }
 
+    /** The hit on a result line, as a definition, so peek and F12 keep working. */
+    private definitionAt(document: vscode.TextDocument, position: vscode.Position): vscode.Location | undefined {
+        if (document.uri.toString() !== ResultsDocumentProvider.uri.toString()) return undefined;
+        const hit = this.hits.find(entry => entry.documentLine === position.line);
+        if (hit) {
+            return new vscode.Location(vscode.Uri.file(hit.file), new vscode.Position(Math.max(0, hit.sourceLine), 0));
+        }
+        const header = this.fileLines.find(entry => entry.documentLine === position.line);
+        if (!header) return undefined;
+        return new vscode.Location(vscode.Uri.file(header.file), new vscode.Position(0, 0));
+    }
     /** Opens a hit next to the results, so following a link never hides them. */
     private async followResult(file: string, line: number): Promise<void> {
         this.lastFollowAt = Date.now();
@@ -318,9 +341,9 @@ export class ResultsView implements vscode.Disposable {
     }
 
     private async ensureLanguage(document: vscode.TextDocument): Promise<void> {
-        if (document.languageId === SEARCH_RESULT_LANGUAGE) return;
+        if (document.languageId === RESULTS_LANGUAGE) return;
         try {
-            await vscode.languages.setTextDocumentLanguage(document, SEARCH_RESULT_LANGUAGE);
+            await vscode.languages.setTextDocumentLanguage(document, RESULTS_LANGUAGE);
         } catch {
             /* keep whatever language the host picked */
         }
@@ -358,6 +381,7 @@ export class ResultsView implements vscode.Disposable {
         const built = await buildResultsText(snapshot, rows, radius, readSource);
         this.matchLines = built.matchLines;
         this.hits = built.hits;
+        this.fileLines = built.fileLines;
         log(`results render ${rows.length} rows from ${filesRead} files in ${Date.now() - startedAt} ms`);
         return built.text;
     }
@@ -414,6 +438,11 @@ export class ResultsView implements vscode.Disposable {
         this.disposables.length = 0;
     }
 }
+
+
+
+
+
 
 
 

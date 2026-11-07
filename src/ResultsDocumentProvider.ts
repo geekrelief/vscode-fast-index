@@ -91,6 +91,7 @@ export async function buildResultsText(
     text: string;
     matchLines: Map<string, number>;
     hits: Array<{ documentLine: number; file: string; sourceLine: number }>;
+    fileLines: Array<{ documentLine: number; file: string }>;
 }> {
     const files = new Set(rows.map(row => row.fileName));
     const flags = [
@@ -116,6 +117,8 @@ export async function buildResultsText(
     const matchLines = new Map<string, number>();
     /** Document line -> the hit on it, so the whole result line can be a Follow link. */
     const hits: Array<{ documentLine: number; file: string; sourceLine: number }> = [];
+    /** Document line -> the file header line, so it can be followed too. */
+    const fileLines: Array<{ documentLine: number; file: string }> = [];
     let currentFile = '';
 
     for (const row of rows) {
@@ -123,6 +126,7 @@ export async function buildResultsText(
             if (currentFile !== '') body.push('');
             currentFile = row.fileName;
             body.push(labelForFile(row.file) + ':');
+            fileLines.push({ documentLine: body.length - 1, file: row.file });
         }
 
         const source = await readSource(row.file);
@@ -152,8 +156,9 @@ export async function buildResultsText(
     const offset = header.length + 2;
     for (const [key, index] of matchLines) matchLines.set(key, index + offset);
     for (const hit of hits) hit.documentLine += offset;
+    for (const entry of fileLines) entry.documentLine += offset;
 
-    return { text: [header.join('\n'), summary, '', body.join('\n')].join('\n'), matchLines, hits };
+    return { text: [header.join('\n'), summary, '', body.join('\n')].join('\n'), matchLines, hits, fileLines };
 }
 
 interface TreeNode {
@@ -195,4 +200,5 @@ export function orderRowsDepthFirst(rows: ResultRow[]): ResultRow[] {
 
     return ordered;
 }
+
 

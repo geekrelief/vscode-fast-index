@@ -29,6 +29,26 @@
   ],
   "license": "MIT",
   "contributes": {
+    "languages": [
+      {
+        "id": "fast-index-results",
+        "aliases": [
+          "Fast Index Results"
+        ]
+      }
+    ],
+    "grammars": [
+      {
+        "language": "fast-index-results",
+        "scopeName": "text.fastIndexResults",
+        "path": "./syntaxes/fastIndexResults.tmLanguage.json"
+      }
+    ],
+    "configurationDefaults": {
+      "[fast-index-results]": {
+        "editor.lineNumbers": "off"
+      }
+    },
     "viewsContainers": {
       "activitybar": [
         {
@@ -325,3 +345,5 @@
     "typescript": "^5.9.3"
   }
 }
+
+
