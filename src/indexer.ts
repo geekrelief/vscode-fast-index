@@ -7,6 +7,7 @@ import * as crypto from 'crypto';
 import { computeTrigrams, queryTrigrams } from './trigrams';
 import { log } from './log';
 import { BATCH_WINDOW } from './protocol';
+import { isBinaryContent } from './binary';
 import {
     IgnoreFileStats,
     IgnoreRule,
@@ -390,14 +391,7 @@ export class ProjectIndexer {
         this.worker.on('message', (msg) => {
             if (msg.type === 'binaryFile') {
                 // The worker will not index a binary: drop whatever an older build kept.
-                if (this.fileIdOf.has(msg.filePath)) {
-                    const rootIndex = this.rootIndexFor(msg.filePath);
-                    this.removeFileFromIndex(msg.filePath);
-                    this.binaryRemovals++;
-                    if (rootIndex >= 0 && !this.isIndexing) {
-                        this.queueJournal(rootIndex, JSON.stringify({ p: msg.filePath, d: 1 }) + '\n');
-                    }
-                }
+                this.dropBinaryFile(msg.filePath);
                 return;
             }
             if (msg.type === 'fileDone' || msg.type === 'singleDone') {
@@ -1237,6 +1231,17 @@ export class ProjectIndexer {
         this.blankFile(fileId);
     }
 
+    /** Drops a file that turned out to be binary, and journals the removal. */
+    private dropBinaryFile(filePath: string): void {
+        if (!this.fileIdOf.has(filePath)) return;
+        const rootIndex = this.rootIndexFor(filePath);
+        this.removeFileFromIndex(filePath);
+        this.binaryRemovals++;
+        if (rootIndex >= 0 && !this.isIndexing) {
+            this.queueJournal(rootIndex, JSON.stringify({ p: filePath, d: 1 }) + '\n');
+        }
+    }
+
     private shouldIndex(filePath: string): boolean {
         const normalized = normalizePath(filePath);
         const segments = normalized.split('/');
@@ -1261,6 +1266,12 @@ export class ProjectIndexer {
 
     /** Re-indexes one file from an in-memory buffer (used after a replacement). */
     public indexDocument(filePath: string, text: string, isDirty: boolean): void {
+        // The last gate before a file enters the index: a binary never does, whichever
+        // path got here (build worker, watcher, or an in-memory replacement).
+        if (isBinaryContent(text)) {
+            this.dropBinaryFile(filePath);
+            return;
+        }
         const trigrams = computeTrigrams(text);
         let mtime = 0;
         let size = 0;

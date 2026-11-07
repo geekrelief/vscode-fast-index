@@ -1,16 +1,24 @@
 /**
- * A NUL byte in the first few KB is the same heuristic VS Code itself uses to
- * decide that a file is binary. Indexed binaries are pure noise: their trigrams
- * cost memory, their "lines" are gibberish, and they match queries for strings
- * that happen to sit in a compiled symbol table (a `.dll` mentioning a tool name).
+ * Binary detection for the two places a file can enter the index (the build worker
+ * and the in-memory replacement path). Indexed binaries are pure noise: their
+ * trigrams cost memory, their "lines" are gibberish, and they match queries for
+ * strings that happen to sit in a compiled symbol table (a `.dll` that mentions a
+ * tool name).
+ *
+ * VS Code sniffs the first 8 KB to keep opening a file cheap, but the indexer has
+ * already read the whole file, so this scans all of it: a binary with a long text
+ * prologue would otherwise slip past the sniff. A NUL byte is a reliable marker —
+ * C0 control characters alone are not, because source files legitimately contain
+ * tabs and newlines, and only text formats such as UTF-16 use NUL bytes, which the
+ * indexer could not read as UTF-8 anyway.
  */
-const SNIFF_BYTES = 8192;
-
 export function isBinaryContent(content: string | Uint8Array): boolean {
-    const limit = Math.min(content.length, SNIFF_BYTES);
-    for (let i = 0; i < limit; i++) {
-        const byte = typeof content === 'string' ? content.charCodeAt(i) : content[i];
-        if (byte === 0) return true;
+    if (typeof content === 'string') {
+        // A native single-code-unit scan over the whole buffer, not just a prefix.
+        return content.indexOf('\u0000') !== -1;
+    }
+    for (let i = 0; i < content.length; i++) {
+        if (content[i] === 0) return true;
     }
     return false;
 }

@@ -27,7 +27,7 @@ Instead of searching text "on the fly" for every query, the plugin builds an inv
 * **Native Sidebar Integration:** A dedicated activity bar icon ⚡️ ensures the search doesn't clutter your built-in tools. Keeps its state even when you switch tabs.
 * **Multithreading:** Heavy file parsing is offloaded to background OS threads. Your VS Code UI won't freeze during indexing.
 * **Ignore files instead of hand-written globs:** **Fast Index: Load Ignore File for Indexing** (also the **Load…** button next to *Ignore Files* in the settings) reads a `.gitignore`-style file — `.gitignore`, `.loreignore`, or any file you pick — and keeps everything it lists out of the index. List several, comma separated (`fastIndex.ignoreFiles = .loreignore, .ignore`): every file's rules are applied in the order given, later files winning a conflict. The syntax is gitignore's own: `#` comments, `!` re-includes, a trailing `/` for directories, a leading `/` (or any inner `/`) to anchor at the workspace folder, and `*` `?` `**` `[...]` wildcards. Rules are re-read whenever the setting or the file changes and on every build, and they apply to the live file watcher too — so a compiled binary dropped into `Binaries/` never enters the index. Files that are already indexed leave it as soon as a rule covers them.
-* **Binaries are never indexed:** a NUL byte in the first 8 KB marks a file as binary (the same check VS Code uses) and it is skipped, along with anything an old index kept for it. Compiled `.dll`/`.so`/`.lib` blobs can no longer match a query through their symbol tables or fill the results with gibberish lines.
+* **Binaries are never indexed:** a NUL byte marks a file as binary and it is skipped. The **whole file** is scanned, not just its first few KB, so a binary with a long text prologue cannot slip through, and the check runs on content *after* the path has survived the include/exclude and ignore rules — so a `!` negation cannot re-include a binary. Every route into the index is guarded: the build worker, the file watcher, and the in-memory buffer a replacement produces. An old cache that still lists a binary keeps it out of results too (the search read path checks as well), and the next reindex purges it. Compiled `.dll`/`.so`/`.lib` blobs can no longer match a query through their symbol tables or fill the results with gibberish lines. Only text formats are affected: UTF-16 files contain NUL bytes, so they are treated as binary — the indexer reads UTF-8, and indexing their byte soup would only produce gibberish.
 * **Disk Caching & Live Updates:** The index is saved locally and instantly loads upon restart. Live file watchers keep the index accurate as you code.
 
 ## How to Use
@@ -87,6 +87,12 @@ The index is built from trigrams: every word of three or more characters contrib
 The results tab is a real editor, so its highlighting is the editor's own: no theme parsing or token mapping lives in this extension any more.
 
 ## Changelog
+
+### 0.25.0 → 0.25.1 — the binary gate is now unconditional
+
+* **The whole file is scanned for a NUL byte**, not just the first 8 KB. A compiled artifact with a long text prologue (or a NUL late in the file) used to be indexed; the indexer has already read the entire file, so the scan costs nothing measurable.
+* **Every route into the index is guarded.** The build worker and the watcher already checked; the in-memory buffer a replacement produces (`indexDocument`) did not, and now does — it drops the file instead of indexing it. Ignore-file negations cannot override any of this: the content check happens after the path has survived the rules, so `!Binaries/keep.dll` re-includes the *path* and the gate still refuses the *content*.
+* **Verified that a stale cache cannot leak a binary into results**: an index built before this check can still list one, so the search read path drops it (the results tree and editor never see it) and the next reindex removes it from the segment.
 
 ### 0.24.0 → 0.25.0 — one obvious reindex action, and negations that survive pruning
 
