@@ -1365,6 +1365,18 @@ export class ProjectIndexer {
         if (!this.shouldIndex(filePath)) return;
         const config = vscode.workspace.getConfiguration('fastIndex');
         const maxFileSizeKB = config.get<number>('maxFileSizeKB') || 512;
+        // A file that grew past the limit, or vanished before its delete event, has to
+        // leave the index: the worker will not read it, so keeping the old entry would
+        // keep answering with content that is no longer there.
+        try {
+            if (fs.statSync(filePath).size > maxFileSizeKB * 1024) {
+                this.deleteFile(filePath);
+                return;
+            }
+        } catch {
+            this.deleteFile(filePath);
+            return;
+        }
         this.worker.postMessage({ type: 'processSingle', filePath, maxFileSizeKB });
     }
 

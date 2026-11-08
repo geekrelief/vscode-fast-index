@@ -90,6 +90,11 @@ The results tab is a real editor, so its highlighting is the editor's own: no th
 
 ## Changelog
 
+### 0.29.2 → 0.29.3 — a file that grows past the size limit leaves the index
+
+* The watcher reported the change, but `processSingle` refuses files above `fastIndex.maxFileSizeKB` and said nothing, so an indexed file that grew past the limit kept its **old** entry: the previous content stayed searchable (and opening the hit showed different text) while the new content was never indexed. `updateFile` now checks the size first and drops the file from the index — journaled, so a restart keeps it dropped — instead of asking the worker to read it. A file that shrinks back under the limit is indexed again on its next change.
+* Same path, same fix: if the file is already gone when its change event arrives, the entry is dropped rather than left behind waiting for a delete event that may not come.
+
 ### 0.29.1 → 0.29.2 — the title-bar lock button follows a restored lock
 
 * **The lock button showed the wrong action after a reload.** The lock is persisted (`fastIndex.locked`), but the title bar chooses between the 🔒 Lock and 🔓 Unlock buttons from the `fastIndex.locked` **context key**, and that key was only written when the user toggled the lock. A session that started locked therefore drew the *Lock* button: clicking it set the state it already had, so the icon never changed while searching stayed frozen.
