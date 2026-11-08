@@ -57,7 +57,6 @@ export class ResultsView implements vscode.Disposable {
             vscode.commands.registerCommand('vscode-fast-index.followResult', (file: string, line: number) =>
                 this.followResult(file, line)),
             vscode.window.onDidChangeTextEditorSelection(event => this.onSelection(event)),
-            vscode.window.onDidChangeActiveTextEditor(editor => this.onNavigatedIntoResultsGroup(editor)),
             // VS Code's own search-result language only makes the line-number prefix of a hit
             // followable (its definition range stops at the "12: " text). Link the whole line
             // ourselves so ctrl+click works anywhere on it.
@@ -85,7 +84,7 @@ export class ResultsView implements vscode.Disposable {
         return links;
     }
 
-    /** Opens a hit next to the results, so following a link never hides them. */
+    /** Opens a hit in the group the user is working in, as a normal editor tab. */
     private async followResult(file: string, line: number): Promise<void> {
         this.lastFollowAt = Date.now();
         // Before the open: the selection change fires while the editor is being shown, and its
@@ -95,31 +94,12 @@ export class ResultsView implements vscode.Disposable {
             const document = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
             const position = new vscode.Position(Math.max(0, line), 0);
             await vscode.window.showTextDocument(document, {
-                viewColumn: await this.neighbourColumn(),
                 preserveFocus: false,
                 selection: new vscode.Range(position, position),
             });
         } catch {
             /* the file went away since the search */
         }
-    }
-
-    /** The group next to the results tab: above it when there is one, otherwise below. */
-    private async neighbourColumn(): Promise<vscode.ViewColumn | undefined> {
-        const host = this.resultsGroupColumn();
-        if (host === undefined) return undefined;
-        return (host > 1 ? host - 1 : host + 1) as vscode.ViewColumn;
-    }
-
-    /** Column of the group holding the results tab, if it is open. */
-    private resultsGroupColumn(): vscode.ViewColumn | undefined {
-        const target = ResultsDocumentProvider.uri.toString();
-        for (const group of vscode.window.tabGroups.all) {
-            const holds = group.tabs.some(tab =>
-                tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === target);
-            if (holds) return group.viewColumn;
-        }
-        return undefined;
     }
 
     /**
@@ -159,79 +139,13 @@ export class ResultsView implements vscode.Disposable {
 
             const document = await vscode.workspace.openTextDocument(ResultsDocumentProvider.uri);
             await this.ensureLanguage(document);
-            await this.showInDock(document, options?.preserveFocus === true);
+            // One tab in the group the user is already in: no new splits, no moved editors.
+            await vscode.window.showTextDocument(document, {
+                preview: false,
+                preserveFocus: options?.preserveFocus === true,
+            });
         } finally {
             this.opening = false;
-        }
-    }
-
-    /**
-     * Puts the tab where `fastIndex.resultsDock` says. `below` splits the active group
-     * downwards first, so the document the search came from stays visible above the results
-     * instead of being hidden behind them in the same group.
-     */
-    private async showInDock(document: vscode.TextDocument, preserveFocus: boolean): Promise<void> {
-        const dock = vscode.workspace.getConfiguration('fastIndex').get<string>('resultsDock', 'current');
-
-        if (dock === 'right') {
-            await vscode.window.showTextDocument(document, {
-                viewColumn: vscode.ViewColumn.Beside,
-                preview: false,
-                preserveFocus,
-            });
-            return;
-        }
-
-        let split: { column: vscode.ViewColumn; copyOf: vscode.Tab } | undefined;
-        if (dock === 'below') {
-            // A split duplicates the editor that has focus; remember it so the copy can go.
-            const copyOf = vscode.window.tabGroups.activeTabGroup?.activeTab;
-            try {
-                await vscode.commands.executeCommand('workbench.action.splitEditorDown');
-                const column = vscode.window.tabGroups.activeTabGroup?.viewColumn;
-                if (copyOf && column !== undefined) split = { column, copyOf };
-            } catch {
-                /* no editor to split from: fall back to the active group */
-            }
-        }
-
-        await vscode.window.showTextDocument(document, { preview: false, preserveFocus });
-
-        if (split) await this.closeSplitCopy(split.column, split.copyOf);
-    }
-
-    /**
-     * The group a `below` split created starts as a copy of the editor that had focus. Once the
-     * results are placed there the copy is just clutter — the original still sits above — so it
-     * is closed, leaving the split as document-above, results-below.
-     */
-    private async closeSplitCopy(column: vscode.ViewColumn, copyOf: vscode.Tab): Promise<void> {
-        const group = vscode.window.tabGroups.all.find(candidate => candidate.viewColumn === column);
-        if (!group) return;
-
-        const sameDocument = (candidate: vscode.Tab): boolean => {
-            const a = candidate.input;
-            const b = copyOf.input;
-            if (a instanceof vscode.TabInputText && b instanceof vscode.TabInputText) {
-                return a.uri.toString() === b.uri.toString();
-            }
-            if (a instanceof vscode.TabInputTextDiff && b instanceof vscode.TabInputTextDiff) {
-                return a.original.toString() === b.original.toString()
-                    && a.modified.toString() === b.modified.toString();
-            }
-            return false;
-        };
-
-        const copy = group.tabs.find(tab => sameDocument(tab)
-            && !(tab.input instanceof vscode.TabInputText
-                && tab.input.uri.toString() === ResultsDocumentProvider.uri.toString()));
-        if (!copy) return;
-
-        try {
-            await vscode.window.tabGroups.close(copy, true);
-            log('results: closed the copy the split left behind');
-        } catch {
-            /* already closed */
         }
     }
 
@@ -270,36 +184,6 @@ export class ResultsView implements vscode.Disposable {
         const target = ResultsDocumentProvider.uri.toString();
         const input = vscode.window.tabGroups.activeTabGroup?.activeTab?.input;
         return input instanceof vscode.TabInputText && input.uri.toString() === target;
-    }
-
-    /**
-     * The results tab has its own group: a file that opens there — Follow link (ctrl+click)
-     * or any other open — is moved to the neighbouring group, so the results stay in view
-     * instead of being replaced by the file the link pointed at.
-     */
-    private onNavigatedIntoResultsGroup(editor: vscode.TextEditor | undefined): void {
-        if (!editor) return;
-        if (editor.document.uri.scheme === ResultsDocumentProvider.scheme) return;
-        const groups = vscode.window.tabGroups.all;
-        if (groups.length < 2) return;
-
-        const host = this.resultsGroupColumn();
-        if (host === undefined || editor.viewColumn !== host) return;
-        // The click that opened this file was a follow; do not also peek at it.
-        this.lastFollowAt = Date.now();
-
-
-        const command = host > 1
-            ? 'workbench.action.moveEditorToPreviousGroup'
-            : 'workbench.action.moveEditorToNextGroup';
-        // The editor has just been shown; move it once the workbench settles, then let the
-        // host know the selection that follows is navigation, not a query.
-        setTimeout(() => {
-            void vscode.commands.executeCommand(command).then(
-                () => this.onFollowNavigate?.(editor.document.uri.fsPath, -1),
-                () => undefined
-            );
-        }, 0);
     }
 
     /** Brings an already-open results tab to the front without moving keyboard focus. */
