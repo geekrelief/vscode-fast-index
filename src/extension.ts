@@ -233,6 +233,13 @@ export async function activate(context: vscode.ExtensionContext) {
         if (!Array.isArray(roots) || roots.length === 0) return Promise.resolve(false);
         return runBuild(roots, false);
     });
+    // The everyday reindex: every folder, but only files whose size or timestamp moved.
+    // This is what the watcher cannot cover on its own (changes made while the window
+    // was closed, files that stopped matching an ignore rule, …).
+    const reindexChangedCommand = vscode.commands.registerCommand(
+        'vscode-fast-index.reindexChanged',
+        () => runBuild(undefined, false)
+    );
 
     const watcher = vscode.workspace.createFileSystemWatcher('**/*');
     // Editing an ignore file changes what may be indexed, so reload the rules and
@@ -250,7 +257,7 @@ export async function activate(context: vscode.ExtensionContext) {
     });
     watcher.onDidDelete(uri => indexer.deleteFile(uri.fsPath));
 
-    context.subscriptions.push(indexCommand, reindexCommand, watcher, { dispose: () => indexer.dispose() });
+    context.subscriptions.push(indexCommand, reindexCommand, reindexChangedCommand, watcher, { dispose: () => indexer.dispose() });
 
     // The webview is registered above, so the panel renders immediately and reports progress
     // instead of staying blank while the index is read from disk.

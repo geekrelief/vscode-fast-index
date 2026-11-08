@@ -66,15 +66,53 @@ When indexing starts on its own: the **first** build always asks, so an ignore f
 * **Auto Search from the results window:** on/off (default off, also `fastIndex.autoSearchFromResults`). Off means selecting a line in the results editor never disturbs your query; on means that selection fills the search box like an editor selection would.
 * **Cached indexes:** The settings panel lists every cached workspace folder with its build date and size, and the list **refreshes after every build** — the sizes and dates you see are the ones on disk, not the ones from when the panel opened. Tick the ones you want to drop (or **Select all**) and press **Delete selected**; a confirmation dialog is shown before anything is deleted. **Reindex selected** re-scans only the ticked folders, skipping files whose size and timestamp are unchanged, and leaves the other caches untouched; ticking **every** folder counts as a full build, so it also clears the stale-settings banner. **Rebuild all** (in the Indexing group) is the bigger hammer: it re-reads every file in every folder and ignores the stored timestamps. Caches whose folder no longer exists are marked **missing**, and **Delete stale** removes all of them in one confirmed step. A deleted folder is re-indexed only when you run **Fast Index: Build Project Index**. **Open folder** (or the palette's *Fast Index: Open Index Folder in Explorer*) reveals the folder that holds the segment files, so you can see them, copy them, or clear them by hand.
 
+## Live updates: what the watcher does
+
+The extension watches the workspace from the moment it activates — not only while the panel is open — with `vscode.workspace.createFileSystemWatcher('**/*')`:
+
+| Event | What the index does |
+|---|---|
+| File created or changed | It is re-read on the background worker (size check, binary gate, trigrams) and the index is updated **immediately**, so the very next search sees the new text and no longer sees the old one. A journal line is appended to `<segment>.journal` about 250 ms later. |
+| File deleted | The entry is dropped at once and the removal is journaled. |
+| File replaced through **Replace** / **Replace All** | The affected buffers are re-indexed directly, before they are saved. |
+
+The same filters as a build apply: hidden folders, build-artifact folders, `includeExtensions`, the ignore files, `maxFileSizeKB` and the binary check. A file that grows past the size limit is dropped from the index (and indexed again if it shrinks back), and a file that is already gone by the time its change event arrives is dropped too.
+
+The index follows **saved** files: an unsaved editor buffer is not indexed, so text you have typed but not saved cannot introduce a new match yet. (Results that already exist still read the live buffer, which is why an applied replacement shows its new text immediately.)
+
+### Why a change survives a restart
+
+Live edits do not rewrite the segment file — that would mean compressing tens of megabytes on every save. They go to a small journal next to it:
+
+```
+root-<folder-hash>.v5.bin           the last build
+root-<folder-hash>.v5.bin.journal   everything that changed since
+```
+
+Startup loads the segment and replays the journal on top, so a restart keeps every change without a rebuild. A build folds the journal into the segment and deletes it — which is why the size shown in **Cached indexes** only changes when you reindex, even though the content has been current all along.
+
+### When a reindex *is* needed
+
+| Situation | Why the watcher cannot help | What to run |
+|---|---|---|
+| Files changed while VS Code was **closed** | no events were delivered; the index is only as fresh as the last session | **Fast Index: Reindex Changed Files** |
+| A file is **no longer ignored** (you removed a rule) | removing a rule does not emit a file event | **Fast Index: Reindex Changed Files** |
+| Files **deleted** while VS Code was closed | the startup load trusts the stored file list | **Fast Index: Reindex Changed Files** (the walk's sweep removes them) |
+| Paths under VS Code's own `files.watcherExclude` (`**/node_modules/**`, `**/.git/objects/**`, `**/.svn/**`, …) | the workbench never delivers events for them | **Fast Index: Reindex Changed Files**, if that folder is meant to be indexed |
+| The cache itself is suspect (a corrupted file, an interrupted disk, an extension fix that changes how files are read) | nothing to compare against | **Fast Index: Build Project Index** / **Rebuild all** |
+
+**Fast Index: Reindex Changed Files** (palette) is the everyday one: it walks every folder and re-reads only the files whose size or timestamp differ, so the cost is a directory scan plus the files you actually touched. The same walk runs from the stale banner's **Reindex now** and from **Reindex selected** in Cached indexes with every folder ticked. **Rebuild all** force-re-reads every file and is only worth it for the last case in that table.
+
 ## Where the index lives
 
 One cache segment per workspace folder, shared by every workspace that contains that folder:
 
 ```
 %APPDATA%\Code\User\globalStorage\eric.vscode-fast-index\fast-index\root-<folder-hash>.v5.bin
+root-<folder-hash>.v5.bin.journal
 ```
 
-Each segment is a gzip-compressed binary file — roughly 34 MB for the Unreal Engine source tree — plus a small `<segment>.journal` holding edits made while VS Code was running.
+Each segment is a gzip-compressed binary file — roughly 34 MB for the Unreal Engine source tree — plus a small journal holding the edits made while VS Code was running.
 
 ## Performance
 
@@ -89,6 +127,11 @@ The index is built from trigrams: every word of three or more characters contrib
 The results tab is a real editor, so its highlighting is the editor's own: no theme parsing or token mapping lives in this extension any more.
 
 ## Changelog
+
+### 0.29.3 → 0.29.4 — a documented live-update story, and the command to go with it
+
+* The README has a new **Live updates: what the watcher does** section: the create/change/delete behavior, the journal that makes changes survive a restart, why the cache file size only moves on a build, and a table of the cases the watcher cannot cover (edits while VS Code was closed, a file that stopped being ignored, deletions while closed, `files.watcherExclude` paths) with what to run for each.
+* New command **Fast Index: Reindex Changed Files** — the everyday reindex: every folder, but files whose size and timestamp are unchanged are skipped without being read. It is the honest answer for those cases, and it makes the fast path reachable without ticking every cache row or waiting for the stale banner.
 
 ### 0.29.2 → 0.29.3 — a file that grows past the size limit leaves the index
 
